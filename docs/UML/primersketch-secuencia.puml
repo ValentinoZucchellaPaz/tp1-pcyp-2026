@@ -1,0 +1,138 @@
+@startuml diagrama-secuencia
+title TP1 — Recorrido de una orden + cierre en cascada de una etapa
+
+actor Main
+participant "createdQueue\n: StageQueue" as CQ
+participant "AssignmentWorker" as AW
+participant "PrinterPool" as PP
+participant "EventLog" as EL
+participant "waitingValidationQueue\n: StageQueue" as WVQ
+participant "ValidationWorker" as VW
+participant "readyToPrintQueue\n: StageQueue" as RPQ
+participant "PrintingWorker" as PW
+participant "printedQueue\n: StageQueue" as PDQ
+participant "QualityWorker" as QW
+participant "TerminationTracker" as TT
+participant "StageBarrier\n(asignación)" as SB
+
+== Inicialización ==
+Main -> EL : append(ORDER_CREATED, toState=CREATED)
+Main -> CQ : offer(order)
+note right of Main
+  se repite para las 500 órdenes;
+  al final, 3 offer(POISON) en CQ
+  (una por worker de asignación)
+end note
+
+== Etapa 1: Asignación (orden real) ==
+AW -> CQ : take()
+activate AW
+CQ --> AW : order
+AW -> PP : reserveAny(orderId)
+activate PP
+PP --> AW : printer (RESERVED, usageCount++)
+deactivate PP
+AW -> AW : order.setState(WAITING_VALIDATION)
+AW -> EL : append(ASSIGNMENT, CREATED->WAITING_VALIDATION, printer)
+AW -> WVQ : offer(order)
+deactivate AW
+
+== Etapa 2: Validación ==
+VW -> WVQ : take()
+activate VW
+WVQ --> VW : order
+VW -> VW : OutcomeDecider.isModelValid(seed, orderId)
+
+alt modelo válido
+    VW -> VW : order.setState(READY_TO_PRINT)
+    VW -> EL : append(VALIDATION, WAITING_VALIDATION->READY_TO_PRINT, printer)
+    VW -> RPQ : offer(order)
+else modelo inválido
+    VW -> VW : order.setState(REJECTED)
+    VW -> PP : release(printer)
+    VW -> EL : append(VALIDATION, WAITING_VALIDATION->REJECTED, printer)
+    VW -> TT : orderCompleted()
+    note right of TT : orden terminal, se cuenta\npara la condición de fin global
+end
+deactivate VW
+
+== Etapa 3: Impresión ==
+PW -> RPQ : take()
+activate PW
+RPQ --> PW : order
+PW -> PW : OutcomeDecider.isPrintSuccessful(seed, orderId)
+
+alt impresión exitosa
+    PW -> PW : order.setState(PRINTED)
+    PW -> PP : release(printer)
+    PW -> EL : append(PRINTING, READY_TO_PRINT->PRINTED, printer)
+    PW -> PDQ : offer(order)
+else impresión falla
+    PW -> PW : order.setState(PRINT_FAILED)
+    PW -> PP : markOutOfService(printer)
+    PW -> EL : append(PRINTING, READY_TO_PRINT->PRINT_FAILED, printer)
+    PW -> TT : orderCompleted()
+end
+deactivate PW
+
+== Etapa 4: Control de calidad ==
+QW -> PDQ : take()
+activate QW
+PDQ --> QW : order
+QW -> QW : OutcomeDecider.isQualityApproved(seed, orderId)
+
+alt aprobado
+    QW -> QW : order.setState(APPROVED)
+    QW -> EL : append(QUALITY_CONTROL, PRINTED->APPROVED)
+else defectuoso
+    QW -> QW : order.setState(DEFECTIVE)
+    QW -> EL : append(QUALITY_CONTROL, PRINTED->DEFECTIVE)
+end
+QW -> TT : orderCompleted()
+deactivate QW
+
+== Cierre en cascada: ejemplo con la etapa de Asignación ==
+note over AW, SB
+  Cuando un AssignmentWorker saca una píldora de createdQueue
+  (en vez de una orden real) ejecuta esto:
+end note
+
+AW -> CQ : take()
+activate AW
+CQ --> AW : POISON
+AW -> SB : workerFinished()
+activate SB
+SB --> AW : false (todavía no soy el último)
+deactivate SB
+AW -> AW : return (este worker termina)
+deactivate AW
+
+...otro AssignmentWorker recibe su píldora...
+
+AW -> CQ : take()
+activate AW
+CQ --> AW : POISON
+AW -> SB : workerFinished()
+activate SB
+SB --> AW : true (soy el 3ro de 3, el último)
+deactivate SB
+AW -> WVQ : offer(POISON) x2\n(una por ValidationWorker)
+AW -> AW : return (este worker termina)
+deactivate AW
+
+== Terminación global ==
+Main -> TT : awaitAll()
+activate Main
+activate TT
+note right of TT
+  wait() hasta que
+  terminalCount == totalOrders
+end note
+TT --> Main : (despierta cuando se cumple)
+deactivate TT
+Main -> Main : join() de los 10 workers
+Main -> EL : close()
+Main -> Main : escribe elementos.csv y resumen.properties
+deactivate Main
+
+@enduml

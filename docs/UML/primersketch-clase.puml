@@ -1,0 +1,204 @@
+@startuml diagrama-clases
+title TP1 — Granja de Impresión 3D — Diagrama de Clases (ADR-0001)
+skinparam classAttributeIconSize 0
+hide empty members
+
+package "ar.edu.unc.fcefyn.pcp.tp1.api (cátedra, no modificar)" #F2F2F2 {
+    interface Simulation {
+        + execute(config: SimulationConfig): SimulationResult
+    }
+    class SimulationConfig
+    class SimulationResult
+    class OutcomeDecider {
+        + {static} isModelValid(seed, orderId): boolean
+        + {static} isPrintSuccessful(seed, orderId): boolean
+        + {static} isQualityApproved(seed, orderId): boolean
+    }
+    enum OrderState {
+        CREATED
+        WAITING_VALIDATION
+        READY_TO_PRINT
+        PRINTED
+        APPROVED
+        REJECTED
+        PRINT_FAILED
+        DEFECTIVE
+    }
+    enum PrinterState {
+        AVAILABLE
+        RESERVED
+        OUT_OF_SERVICE
+    }
+}
+
+package "ar.edu.unc.fcefyn.pcp.tp1.solution" #FFFFFF {
+
+    class ConcurrentSimulation implements Simulation {
+        + ConcurrentSimulation()
+        + execute(config: SimulationConfig): SimulationResult
+        - buildQueues(config): void
+        - launchWorkers(config): List<Thread>
+        - awaitTermination(): void
+    }
+
+    package model {
+        class Order {
+            - id: int
+            - state: OrderState
+            - printerId: String
+            - assignmentCount: int
+            - validationCount: int
+            - printingCount: int
+            - qualityControlCount: int
+            + getId(): int
+            + getState(): OrderState
+            + setState(s: OrderState): void
+        }
+
+        class Printer {
+            - id: String
+            - row: int
+            - col: int
+            - state: PrinterState
+            - usageCount: int
+            - assignedOrderId: Integer
+            + getId(): String
+            + getState(): PrinterState
+            + incrementUsageCount(): void
+        }
+    }
+
+    package sync {
+        class "StageQueue<T>" as StageQueue {
+            - items: Deque<T>
+            - lock: Object
+            - available: Semaphore
+            + offer(item: T): void
+            + take(): T
+            + offerPoison(pill: T, count: int): void
+        }
+
+        class PrinterPool {
+            - grid: Printer[][]
+            - lock: Object
+            + reserveAny(orderId: int): Printer
+            + release(p: Printer): void
+            + markOutOfService(p: Printer): void
+            + snapshot(): List<PrinterSnapshot>
+        }
+
+        class EventLog {
+            - sequence: long
+            - writer: BufferedWriter
+            + append(elapsedMs, thread, orderId, stage, event, from, to, printer): void
+            + close(): void
+        }
+
+        class StageBarrier {
+            - finishedCount: int
+            - totalWorkers: int
+            + workerFinished(): boolean
+        }
+
+        class TerminationTracker {
+            - terminalCount: int
+            - totalOrders: int
+            + orderCompleted(): void
+            + awaitAll(): void
+        }
+    }
+
+    package workers {
+        abstract class StageWorker {
+            # threadName: String
+            # eventLog: EventLog
+            + {abstract} run(): void
+        }
+
+        class AssignmentWorker extends StageWorker {
+            - inQueue: StageQueue
+            - outQueue: StageQueue
+            - printerPool: PrinterPool
+            - barrier: StageBarrier
+            - delay: StageDelay
+            + run(): void
+        }
+
+        class ValidationWorker extends StageWorker {
+            - inQueue: StageQueue
+            - outQueue: StageQueue
+            - printerPool: PrinterPool
+            - barrier: StageBarrier
+            - terminationTracker: TerminationTracker
+            - delay: StageDelay
+            + run(): void
+        }
+
+        class PrintingWorker extends StageWorker {
+            - inQueue: StageQueue
+            - outQueue: StageQueue
+            - printerPool: PrinterPool
+            - barrier: StageBarrier
+            - terminationTracker: TerminationTracker
+            - delay: StageDelay
+            + run(): void
+        }
+
+        class QualityWorker extends StageWorker {
+            - inQueue: StageQueue
+            - terminationTracker: TerminationTracker
+            - delay: StageDelay
+            + run(): void
+        }
+    }
+
+    package output {
+        class ResultWriter {
+            + writeEventos(events, dir): void
+            + writeElementos(orders, dir): void
+            + writeResumen(summary, dir): void
+        }
+        class StageDelay {
+            - millis: long
+            + apply(): void
+        }
+    }
+}
+
+ConcurrentSimulation "1" *-- "4" StageQueue : createdQueue\nwaitingValidationQueue\nreadyToPrintQueue\nprintedQueue
+ConcurrentSimulation "1" *-- "1" PrinterPool
+ConcurrentSimulation "1" *-- "1" EventLog
+ConcurrentSimulation "1" *-- "1" TerminationTracker
+ConcurrentSimulation "1" *-- "4" StageBarrier
+ConcurrentSimulation "1" *-- "1" ResultWriter
+ConcurrentSimulation "1" ..> SimulationConfig : usa
+ConcurrentSimulation "1" ..> SimulationResult : produce
+ConcurrentSimulation "1" o-- "10" StageWorker : crea e inicia
+
+StageQueue "1" o-- "*" Order : contiene
+
+AssignmentWorker --> PrinterPool : reserveAny()
+ValidationWorker --> PrinterPool : release()
+PrintingWorker --> PrinterPool : release() / markOutOfService()
+PrinterPool "1" o-- "200" Printer
+
+AssignmentWorker ..> OutcomeDecider
+ValidationWorker ..> OutcomeDecider
+PrintingWorker ..> OutcomeDecider
+QualityWorker ..> OutcomeDecider
+
+StageWorker --> EventLog : append()
+StageWorker --> StageDelay : apply()
+ValidationWorker --> TerminationTracker : orderCompleted()
+PrintingWorker --> TerminationTracker : orderCompleted()
+QualityWorker --> TerminationTracker : orderCompleted()
+
+AssignmentWorker --> StageBarrier : workerFinished()
+ValidationWorker --> StageBarrier : workerFinished()
+PrintingWorker --> StageBarrier : workerFinished()
+QualityWorker --> StageBarrier : workerFinished()
+
+Order --> OrderState
+Printer --> PrinterState
+
+@enduml
