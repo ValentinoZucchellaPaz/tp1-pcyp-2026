@@ -20,6 +20,7 @@ import ar.edu.unc.fcefyn.pcp.tp1.solution.internal.runtime.WorkerGroup;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * Punto de entrada obligatorio de la solución.
@@ -56,16 +57,35 @@ public final class ConcurrentSimulation implements Simulation {
             eventLog = new EventLog(config.outputDirectory().resolve("eventos.csv"), startedAtNanos);
             initializeOrders(orders, createdQueue, eventLog);
             createdQueue.offerPoison(config.assignmentThreads());
+            // Las fábricas se ejecutan antes de iniciar los threads. Esta referencia
+            // estable evita mezclar el cierre administrativo del log con el armado
+            // de las tareas de cada etapa.
+            EventLog stageEventLog = eventLog;
 
             // 4. Registrar los threads de cada etapa; add() aún no los inicia.
             // El orden refleja el recorrido: asignación -> validación -> impresión -> calidad.
-            registerAssignmentWorkers(workers, startGate, createdQueue, validationQueue,
-                    printerPool, eventLog, config);
-            registerValidationWorkers(workers, startGate, validationQueue, printingQueue,
-                    printerPool, termination, eventLog, config);
-            registerPrintingWorkers(workers, startGate, printingQueue, qualityQueue,
-                    printerPool, termination, eventLog, config);
-            registerQualityWorkers(workers, startGate, qualityQueue, termination, eventLog, config);
+            StageBarrier assignmentBarrier = new StageBarrier(config.assignmentThreads());
+            registerWorkers(workers, "assignment", config.assignmentThreads(), () ->
+                    new AssignmentWorker(startGate, createdQueue, validationQueue, assignmentBarrier,
+                            config.validationThreads(), config.assignmentDelayMillis(), stageEventLog,
+                            printerPool));
+
+            StageBarrier validationBarrier = new StageBarrier(config.validationThreads());
+            registerWorkers(workers, "validation", config.validationThreads(), () ->
+                    new ValidationWorker(startGate, validationQueue, printingQueue, validationBarrier,
+                            config.printingThreads(), config.validationDelayMillis(), stageEventLog,
+                            printerPool, termination, config));
+
+            StageBarrier printingBarrier = new StageBarrier(config.printingThreads());
+            registerWorkers(workers, "printing", config.printingThreads(), () ->
+                    new PrintingWorker(startGate, printingQueue, qualityQueue, printingBarrier,
+                            config.qualityControlThreads(), config.printingDelayMillis(), stageEventLog,
+                            printerPool, termination, config));
+
+            StageBarrier qualityBarrier = new StageBarrier(config.qualityControlThreads());
+            registerWorkers(workers, "quality", config.qualityControlThreads(), () ->
+                    new QualityControlWorker(startGate, qualityQueue, qualityBarrier,
+                            config.qualityControlDelayMillis(), stageEventLog, termination, config));
 
             workers.startAll();
             // 5. Todos los threads llegan a StartGate y comienzan en conjunto.
@@ -99,49 +119,11 @@ public final class ConcurrentSimulation implements Simulation {
         }
     }
 
-    private static void registerAssignmentWorkers(WorkerGroup workers, StartGate startGate,
-            StageQueue input, StageQueue output, PrinterPool printers, EventLog eventLog,
-            SimulationConfig config) {
-        // El último worker que termina propaga las píldoras a la etapa siguiente.
-        StageBarrier barrier = new StageBarrier(config.assignmentThreads());
-        for (int number = 1; number <= config.assignmentThreads(); number++) {
-            workers.add("assignment-" + number, new AssignmentWorker(startGate, input, output,
-                    barrier, config.validationThreads(), config.assignmentDelayMillis(), eventLog, printers));
-        }
-    }
-
-    private static void registerValidationWorkers(WorkerGroup workers, StartGate startGate,
-            StageQueue input, StageQueue output, PrinterPool printers, TerminationTracker termination,
-            EventLog eventLog, SimulationConfig config) {
-        // Una sola vez, el último worker de validación cierra la entrada de impresión.
-        StageBarrier barrier = new StageBarrier(config.validationThreads());
-        for (int number = 1; number <= config.validationThreads(); number++) {
-            workers.add("validation-" + number, new ValidationWorker(startGate, input, output,
-                    barrier, config.printingThreads(), config.validationDelayMillis(), eventLog,
-                    printers, termination, config));
-        }
-    }
-
-    private static void registerPrintingWorkers(WorkerGroup workers, StartGate startGate,
-            StageQueue input, StageQueue output, PrinterPool printers, TerminationTracker termination,
-            EventLog eventLog, SimulationConfig config) {
-        // Una sola vez, el último worker de impresión cierra la entrada de calidad.
-        StageBarrier barrier = new StageBarrier(config.printingThreads());
-        for (int number = 1; number <= config.printingThreads(); number++) {
-            workers.add("printing-" + number, new PrintingWorker(startGate, input, output,
-                    barrier, config.qualityControlThreads(), config.printingDelayMillis(), eventLog,
-                    printers, termination, config));
-        }
-    }
-
-    private static void registerQualityWorkers(WorkerGroup workers, StartGate startGate,
-            StageQueue input, TerminationTracker termination, EventLog eventLog,
-            SimulationConfig config) {
-        // En la última etapa la barrera solo contabiliza cierres: no hay cola posterior.
-        StageBarrier barrier = new StageBarrier(config.qualityControlThreads());
-        for (int number = 1; number <= config.qualityControlThreads(); number++) {
-            workers.add("quality-" + number, new QualityControlWorker(startGate, input, barrier,
-                    config.qualityControlDelayMillis(), eventLog, termination, config));
+    /** Registra los threads de una etapa sin mezclar ese patrón con su regla de negocio. */
+    private static void registerWorkers(WorkerGroup workers, String threadPrefix, int workerCount,
+            Supplier<WorkerGroup.InterruptibleTask> workerFactory) {
+        for (int number = 1; number <= workerCount; number++) {
+            workers.add(threadPrefix + "-" + number, workerFactory.get());
         }
     }
 

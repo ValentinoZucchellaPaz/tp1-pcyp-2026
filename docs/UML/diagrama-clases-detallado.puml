@@ -1,0 +1,221 @@
+@startuml diagrama-clases-detallado
+title TP1 — Diseño detallado de la simulación concurrente
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+hide circle
+
+package "solution" {
+  class ConcurrentSimulation {
+    +execute(config): SimulationResult
+    -registerWorkers(group, prefix, count, factory)
+    -buildResult(...): SimulationResult
+  }
+}
+
+package "model" {
+  class Order {
+    -id: int
+    -state: OrderState
+    -printerId: String
+    -assignmentCount: int
+    -validationCount: int
+    -printingCount: int
+    -qualityControlCount: int
+    +transitionTo(target): OrderState
+    +recordAssignment()
+    +recordValidation()
+    +recordPrinting()
+    +recordQualityControl()
+  }
+}
+
+package "pipeline" {
+  abstract class AbstractStageWorker {
+    -startGate: StartGate
+    -input: StageQueue
+    -barrier: StageBarrier
+    -delayMillis: long
+    +{final} run()
+    #{abstract} processOrder(order)
+    #onLastWorkerFinished()
+  }
+
+  class AssignmentWorker {
+    -output: StageQueue
+    -nextWorkerCount: int
+    -eventLog: EventLog
+    -printers: PrinterPool
+    #processOrder(order)
+    #onLastWorkerFinished()
+  }
+  class ValidationWorker {
+    -output: StageQueue
+    -nextWorkerCount: int
+    -eventLog: EventLog
+    -printers: PrinterPool
+    -termination: TerminationTracker
+    -config: SimulationConfig
+    #processOrder(order)
+    #onLastWorkerFinished()
+  }
+  class PrintingWorker {
+    -output: StageQueue
+    -nextWorkerCount: int
+    -eventLog: EventLog
+    -printers: PrinterPool
+    -termination: TerminationTracker
+    -config: SimulationConfig
+    #processOrder(order)
+    #onLastWorkerFinished()
+  }
+  class QualityControlWorker {
+    -eventLog: EventLog
+    -termination: TerminationTracker
+    -config: SimulationConfig
+    #processOrder(order)
+  }
+
+  class StageQueue {
+    -items: ArrayDeque<WorkItem>
+    -availableItems: Semaphore
+    +offerOrder(order)
+    +offerPoison(workerCount)
+    ~take(): WorkItem
+  }
+  class WorkItem {
+    -order: Order
+    ~order(order): WorkItem
+    ~poison(): WorkItem
+    ~isPoison(): boolean
+  }
+  class StageBarrier {
+    -workerCount: int
+    -finishedWorkers: int
+    +workerFinished(): boolean
+  }
+  class PipelineSupport <<utility>> {
+    +delay(millis)
+    +transition(log, order, stage, target, printerId)
+  }
+}
+
+package "resource" {
+  class PrinterPool {
+    -printers: Printer[][]
+    -availablePrinters: Semaphore
+    +reserveFor(orderId): String
+    +release(id)
+    +markOutOfService(id)
+    +snapshots(): List<PrinterSnapshot>
+  }
+  class Printer {
+    ~id: String
+    ~state: PrinterState
+    ~usageCount: int
+    ~assignedOrderId: Integer
+  }
+}
+
+package "runtime" {
+  class StartGate {
+    -expectedWorkers: int
+    -waitingWorkers: int
+    -open: boolean
+    +awaitOpen()
+    +openWhenAllWorkersAreReady()
+  }
+  class WorkerGroup {
+    -threads: List<Thread>
+    -cancelling: boolean
+    +add(name, task)
+    +startAll()
+    +joinAll()
+    +cancel()
+  }
+  interface "WorkerGroup.InterruptibleTask" as InterruptibleTask {
+    +run()
+  }
+  class TerminationTracker {
+    -totalOrders: int
+    -completedOrders: int
+    -failure: Throwable
+    +orderCompleted()
+    +awaitAll()
+    +rethrowFailure()
+  }
+}
+
+package "output" {
+  class EventLog {
+    -writer: BufferedWriter
+    -sequence: long
+    +created(orderId)
+    +transition(thread, orderId, stage, from, to, printerId)
+    +close()
+  }
+  class ResultFiles <<utility>> {
+    +writeOrders(path, orders)
+    +writeSummary(...)
+    +orderSnapshots(orders)
+  }
+}
+
+ConcurrentSimulation *-- "4" StageQueue
+ConcurrentSimulation *-- PrinterPool
+ConcurrentSimulation *-- StartGate
+ConcurrentSimulation *-- WorkerGroup
+ConcurrentSimulation *-- TerminationTracker
+ConcurrentSimulation *-- EventLog
+ConcurrentSimulation ..> ResultFiles
+
+AbstractStageWorker ..|> InterruptibleTask
+AbstractStageWorker <|-- AssignmentWorker
+AbstractStageWorker <|-- ValidationWorker
+AbstractStageWorker <|-- PrintingWorker
+AbstractStageWorker <|-- QualityControlWorker
+AbstractStageWorker --> StartGate
+AbstractStageWorker --> StageQueue : toma WorkItem
+AbstractStageWorker --> StageBarrier
+AbstractStageWorker ..> PipelineSupport
+
+AssignmentWorker --> PrinterPool
+AssignmentWorker --> EventLog
+AssignmentWorker --> StageQueue : entrega
+ValidationWorker --> PrinterPool
+ValidationWorker --> EventLog
+ValidationWorker --> TerminationTracker
+ValidationWorker --> StageQueue : entrega
+PrintingWorker --> PrinterPool
+PrintingWorker --> EventLog
+PrintingWorker --> TerminationTracker
+PrintingWorker --> StageQueue : entrega
+QualityControlWorker --> EventLog
+QualityControlWorker --> TerminationTracker
+
+StageQueue *-- WorkItem
+WorkItem --> Order
+PipelineSupport --> Order
+PipelineSupport --> EventLog
+PrinterPool *-- "rows × columns" Printer
+WorkerGroup --> TerminationTracker : informa fallo
+
+note right of StageQueue
+FIFO protegida por monitor.
+Semaphore publica un permiso
+por orden o píldora.
+end note
+
+note right of PrinterPool
+Reserva = acquire semáforo
++ transición AVAILABLE → RESERVED.
+release devuelve permiso;
+OUT_OF_SERVICE no lo devuelve.
+end note
+
+note bottom of AbstractStageWorker
+Template Method:
+el ciclo concurrente es común;
+processOrder conserva las cuatro
+reglas de negocio explícitas.
+end note
+@enduml
