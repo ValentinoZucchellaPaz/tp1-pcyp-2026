@@ -37,6 +37,7 @@ public final class Order {
 
     /** Cambia de estado y devuelve el anterior para registrarlo en el log. */
     public OrderState transitionTo(OrderState target) {
+        // poner validacion?
         OrderState previous = state;
         state = target;
         return previous;

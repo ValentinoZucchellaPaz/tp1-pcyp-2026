@@ -7,7 +7,14 @@ import ar.edu.unc.fcefyn.pcp.tp1.solution.internal.resource.PrinterPool;
 import ar.edu.unc.fcefyn.pcp.tp1.solution.internal.runtime.StartGate;
 import ar.edu.unc.fcefyn.pcp.tp1.solution.internal.runtime.WorkerGroup;
 
-/** Primera etapa: asigna y reserva una impresora para cada orden creada. */
+/**
+ * Primera etapa del pipeline: reserva una impresora para cada orden creada y
+ * la deriva a validación.
+ *
+ * <p>No completa órdenes: toda orden asignada continúa en la cola de validación.
+ * Si recibe una píldora, termina; el último worker de esta etapa propaga las
+ * píldoras necesarias a la etapa siguiente.</p>
+ */
 public final class AssignmentWorker implements WorkerGroup.InterruptibleTask {
     private final StartGate startGate;
     private final StageQueue input;
@@ -33,10 +40,12 @@ public final class AssignmentWorker implements WorkerGroup.InterruptibleTask {
 
     @Override
     public void run() throws InterruptedException {
+        // Ningún worker procesa órdenes hasta que el hilo principal abra la barrera.
         startGate.awaitOpen();
         while (true) {
             WorkItem item = input.take();
             if (item.isPoison()) {
+                // Cada worker consume una píldora; solo el último cierra la próxima etapa.
                 if (barrier.workerFinished()) {
                     output.offerPoison(nextWorkerCount);
                 }
@@ -45,6 +54,7 @@ public final class AssignmentWorker implements WorkerGroup.InterruptibleTask {
 
             Order order = item.order();
             PipelineSupport.delay(delayMillis);
+            // La reserva permanece asociada a la orden hasta su rechazo o impresión.
             String printerId = printers.reserveFor(order.id());
             order.assignPrinter(printerId);
             order.recordAssignment();

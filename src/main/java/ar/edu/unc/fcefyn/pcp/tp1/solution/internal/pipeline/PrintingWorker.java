@@ -10,7 +10,12 @@ import ar.edu.unc.fcefyn.pcp.tp1.solution.internal.runtime.StartGate;
 import ar.edu.unc.fcefyn.pcp.tp1.solution.internal.runtime.TerminationTracker;
 import ar.edu.unc.fcefyn.pcp.tp1.solution.internal.runtime.WorkerGroup;
 
-/** Tercera etapa: imprime y libera o inhabilita la impresora asociada. */
+/**
+ * Tercera etapa: imprime las órdenes válidas y resuelve el destino de su impresora.
+ *
+ * <p>Una impresión exitosa libera la impresora y envía la orden a control de
+ * calidad. Un fallo deja la impresora fuera de servicio y completa la orden.</p>
+ */
 public final class PrintingWorker implements WorkerGroup.InterruptibleTask {
     private final StartGate startGate;
     private final StageQueue input;
@@ -44,6 +49,7 @@ public final class PrintingWorker implements WorkerGroup.InterruptibleTask {
         while (true) {
             WorkItem item = input.take();
             if (item.isPoison()) {
+                // El último impresor propaga el cierre a control de calidad.
                 if (barrier.workerFinished()) {
                     output.offerPoison(nextWorkerCount);
                 }
@@ -54,11 +60,13 @@ public final class PrintingWorker implements WorkerGroup.InterruptibleTask {
             PipelineSupport.delay(delayMillis);
             order.recordPrinting();
             if (OutcomeDecider.isPrintSuccessful(order.id(), config)) {
+                // La orden continúa; la impresora ya puede reutilizarse.
                 PipelineSupport.transition(eventLog, order, "PRINTING", OrderState.PRINTED,
                         order.printerId());
                 printers.release(order.printerId());
                 output.offerOrder(order);
             } else {
+                // El fallo finaliza la orden y retira definitivamente la impresora.
                 PipelineSupport.transition(eventLog, order, "PRINTING", OrderState.PRINT_FAILED,
                         order.printerId());
                 printers.markOutOfService(order.printerId());

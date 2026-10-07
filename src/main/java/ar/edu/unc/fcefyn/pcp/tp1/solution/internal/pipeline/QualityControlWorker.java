@@ -9,7 +9,12 @@ import ar.edu.unc.fcefyn.pcp.tp1.solution.internal.runtime.StartGate;
 import ar.edu.unc.fcefyn.pcp.tp1.solution.internal.runtime.TerminationTracker;
 import ar.edu.unc.fcefyn.pcp.tp1.solution.internal.runtime.WorkerGroup;
 
-/** Cuarta etapa: decide el estado final de calidad, sin usar impresoras. */
+/**
+ * Última etapa: determina si una orden impresa queda aprobada o defectuosa.
+ *
+ * <p>Toda orden que llega aquí finaliza, por lo que se informa al
+ * {@link TerminationTracker}. No existe una cola posterior a esta etapa.</p>
+ */
 public final class QualityControlWorker implements WorkerGroup.InterruptibleTask {
     private final StartGate startGate;
     private final StageQueue input;
@@ -37,6 +42,7 @@ public final class QualityControlWorker implements WorkerGroup.InterruptibleTask
         while (true) {
             WorkItem item = input.take();
             if (item.isPoison()) {
+                // Solo contabiliza el cierre: no hay una etapa posterior que notificar.
                 barrier.workerFinished();
                 return;
             }
@@ -44,6 +50,7 @@ public final class QualityControlWorker implements WorkerGroup.InterruptibleTask
             Order order = item.order();
             PipelineSupport.delay(delayMillis);
             order.recordQualityControl();
+            // Ambas alternativas son estados terminales de la orden.
             OrderState finalState = OutcomeDecider.isQualityApproved(order.id(), config)
                     ? OrderState.APPROVED : OrderState.DEFECTIVE;
             PipelineSupport.transition(eventLog, order, "QUALITY_CONTROL", finalState, "");

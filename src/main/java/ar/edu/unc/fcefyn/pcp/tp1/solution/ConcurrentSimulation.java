@@ -24,17 +24,21 @@ import java.util.Objects;
 /**
  * Punto de entrada obligatorio de la solución.
  *
- * <p>Su única responsabilidad es construir el grafo del pipeline, iniciar los
- * workers y reunir los resultados. La lógica de cada etapa vive en su worker.</p>
+ * <p>
+ * Su única responsabilidad es construir el grafo del pipeline, iniciar los
+ * workers y reunir los resultados. La lógica de cada etapa vive en su worker.
+ * </p>
  */
 public final class ConcurrentSimulation implements Simulation {
 
     @Override
     public SimulationResult execute(SimulationConfig config) throws InterruptedException {
+        // 1. Validar la configuración y preparar el directorio de salida.
         Objects.requireNonNull(config, "config no puede ser null");
         long startedAtNanos = System.nanoTime();
         ResultFiles.createOutputDirectory(config.outputDirectory());
 
+        // 2. Construir los recursos compartidos y las colas entre etapas.
         List<Order> orders = createOrders(config.totalOrders());
         PrinterPool printerPool = new PrinterPool(config.printerRows(), config.printerColumns());
         StageQueue createdQueue = new StageQueue();
@@ -47,11 +51,14 @@ public final class ConcurrentSimulation implements Simulation {
         EventLog eventLog = null;
 
         try {
+            // 3. Cargar las órdenes iniciales. Las píldoras quedan detrás de ellas
+            // en la FIFO, por lo que los workers las recibirán al terminar el trabajo.
             eventLog = new EventLog(config.outputDirectory().resolve("eventos.csv"), startedAtNanos);
             initializeOrders(orders, createdQueue, eventLog);
             createdQueue.offerPoison(config.assignmentThreads());
 
-            // El orden de registro expresa el flujo funcional de una orden.
+            // 4. Registrar los threads de cada etapa; add() aún no los inicia.
+            // El orden refleja el recorrido: asignación -> validación -> impresión -> calidad.
             registerAssignmentWorkers(workers, startGate, createdQueue, validationQueue,
                     printerPool, eventLog, config);
             registerValidationWorkers(workers, startGate, validationQueue, printingQueue,
@@ -61,20 +68,27 @@ public final class ConcurrentSimulation implements Simulation {
             registerQualityWorkers(workers, startGate, qualityQueue, termination, eventLog, config);
 
             workers.startAll();
-            // Ninguna etapa puede tomar trabajo antes de que todos los threads estén listos.
+            // 5. Todos los threads llegan a StartGate y comienzan en conjunto.
             startGate.openWhenAllWorkersAreReady();
+
+            // 6. Esperar que todas las órdenes finalicen o que un worker informe un fallo.
             termination.awaitAll();
             termination.rethrowFailure();
+
+            // 7. En una ejecución normal, las píldoras ya hicieron terminar a todos los workers.
             workers.joinAll();
 
+            // 8. Cerrar el log y construir los archivos y el resultado final.
             eventLog.close();
             eventLog = null;
             return buildResult(config, orders, printerPool, workers, startedAtNanos);
         } catch (InterruptedException exception) {
+            // La cancelación despierta a quienes estén bloqueados y luego se espera su cierre.
             workers.cancel();
             workers.joinAllUninterruptibly();
             throw exception;
         } catch (RuntimeException | Error exception) {
+            // Un fallo de infraestructura o de un worker también cancela todo el pipeline.
             workers.cancel();
             workers.joinAllUninterruptibly();
             throw exception;
@@ -88,6 +102,7 @@ public final class ConcurrentSimulation implements Simulation {
     private static void registerAssignmentWorkers(WorkerGroup workers, StartGate startGate,
             StageQueue input, StageQueue output, PrinterPool printers, EventLog eventLog,
             SimulationConfig config) {
+        // El último worker que termina propaga las píldoras a la etapa siguiente.
         StageBarrier barrier = new StageBarrier(config.assignmentThreads());
         for (int number = 1; number <= config.assignmentThreads(); number++) {
             workers.add("assignment-" + number, new AssignmentWorker(startGate, input, output,
@@ -98,6 +113,7 @@ public final class ConcurrentSimulation implements Simulation {
     private static void registerValidationWorkers(WorkerGroup workers, StartGate startGate,
             StageQueue input, StageQueue output, PrinterPool printers, TerminationTracker termination,
             EventLog eventLog, SimulationConfig config) {
+        // Una sola vez, el último worker de validación cierra la entrada de impresión.
         StageBarrier barrier = new StageBarrier(config.validationThreads());
         for (int number = 1; number <= config.validationThreads(); number++) {
             workers.add("validation-" + number, new ValidationWorker(startGate, input, output,
@@ -109,6 +125,7 @@ public final class ConcurrentSimulation implements Simulation {
     private static void registerPrintingWorkers(WorkerGroup workers, StartGate startGate,
             StageQueue input, StageQueue output, PrinterPool printers, TerminationTracker termination,
             EventLog eventLog, SimulationConfig config) {
+        // Una sola vez, el último worker de impresión cierra la entrada de calidad.
         StageBarrier barrier = new StageBarrier(config.printingThreads());
         for (int number = 1; number <= config.printingThreads(); number++) {
             workers.add("printing-" + number, new PrintingWorker(startGate, input, output,
@@ -120,6 +137,7 @@ public final class ConcurrentSimulation implements Simulation {
     private static void registerQualityWorkers(WorkerGroup workers, StartGate startGate,
             StageQueue input, TerminationTracker termination, EventLog eventLog,
             SimulationConfig config) {
+        // En la última etapa la barrera solo contabiliza cierres: no hay cola posterior.
         StageBarrier barrier = new StageBarrier(config.qualityControlThreads());
         for (int number = 1; number <= config.qualityControlThreads(); number++) {
             workers.add("quality-" + number, new QualityControlWorker(startGate, input, barrier,
@@ -129,6 +147,7 @@ public final class ConcurrentSimulation implements Simulation {
 
     private static SimulationResult buildResult(SimulationConfig config, List<Order> orders,
             PrinterPool printerPool, WorkerGroup workers, long startedAtNanos) {
+        // A esta altura los workers terminaron; las instantáneas son consistentes.
         long durationMillis = ResultFiles.elapsedMillis(startedAtNanos);
         var totals = ResultFiles.totalsByState(orders);
         int remaining = ResultFiles.remainingIntermediateOrders(orders);
@@ -160,7 +179,6 @@ public final class ConcurrentSimulation implements Simulation {
     private static int totalWorkerCount(SimulationConfig config) {
         return Math.addExact(
                 Math.addExact(config.assignmentThreads(), config.validationThreads()),
-                Math.addExact(config.printingThreads(), config.qualityControlThreads())
-        );
+                Math.addExact(config.printingThreads(), config.qualityControlThreads()));
     }
 }

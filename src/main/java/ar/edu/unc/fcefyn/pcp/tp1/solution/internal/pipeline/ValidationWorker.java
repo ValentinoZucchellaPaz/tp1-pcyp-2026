@@ -10,7 +10,13 @@ import ar.edu.unc.fcefyn.pcp.tp1.solution.internal.runtime.StartGate;
 import ar.edu.unc.fcefyn.pcp.tp1.solution.internal.runtime.TerminationTracker;
 import ar.edu.unc.fcefyn.pcp.tp1.solution.internal.runtime.WorkerGroup;
 
-/** Segunda etapa: valida el modelo y rechaza o deriva la orden a impresión. */
+/**
+ * Segunda etapa: valida el modelo y decide si la orden continúa a impresión.
+ *
+ * <p>Una orden inválida termina aquí: libera su impresora y se registra en
+ * {@link TerminationTracker}. Una orden válida conserva la reserva y pasa a
+ * impresión.</p>
+ */
 public final class ValidationWorker implements WorkerGroup.InterruptibleTask {
     private final StartGate startGate;
     private final StageQueue input;
@@ -44,6 +50,7 @@ public final class ValidationWorker implements WorkerGroup.InterruptibleTask {
         while (true) {
             WorkItem item = input.take();
             if (item.isPoison()) {
+                // El último validador propaga el cierre a los workers de impresión.
                 if (barrier.workerFinished()) {
                     output.offerPoison(nextWorkerCount);
                 }
@@ -54,10 +61,12 @@ public final class ValidationWorker implements WorkerGroup.InterruptibleTask {
             PipelineSupport.delay(delayMillis);
             order.recordValidation();
             if (OutcomeDecider.isModelValid(order.id(), config)) {
+                // La impresora sigue reservada para la impresión posterior.
                 PipelineSupport.transition(eventLog, order, "VALIDATION",
                         OrderState.READY_TO_PRINT, order.printerId());
                 output.offerOrder(order);
             } else {
+                // Rechazo es un estado final: la impresora vuelve al pool.
                 PipelineSupport.transition(eventLog, order, "VALIDATION",
                         OrderState.REJECTED, order.printerId());
                 printers.release(order.printerId());

@@ -8,7 +8,8 @@ import java.util.List;
 import java.util.concurrent.Semaphore;
 
 /**
- * Recurso compartido que administra la matriz y la disponibilidad de impresoras.
+ * Recurso compartido que administra la matriz y la disponibilidad de
+ * impresoras.
  * El semáforo bloquea reservas temporariamente imposibles y el monitor protege
  * los cambios de estado de la matriz.
  */
@@ -26,17 +27,23 @@ public final class PrinterPool {
         availablePrinters = new Semaphore(Math.multiplyExact(rows, columns));
     }
 
-    /** Espera una impresora disponible y la reserva exclusivamente para la orden indicada. */
+    /**
+     * Espera una impresora disponible y la reserva exclusivamente para la orden
+     * indicada.
+     *
+     * @throws InterruptedException  si el hilo es interrumpido mientras espera una impresora disponible
+     * @throws IllegalStateException si el semáforo y el estado de las impresoras quedan inconsistentes
+     */
     public String reserveFor(int orderId) throws InterruptedException {
-        availablePrinters.acquire();
-        synchronized (this) {
+        availablePrinters.acquire(); // consumo semaforo (impresora disponible)
+        synchronized (this) { // protejo matriz de impresoras para que solo 1 hilo tome una
             for (Printer[] row : printers) {
                 for (Printer printer : row) {
                     if (printer.state == PrinterState.AVAILABLE) {
                         printer.state = PrinterState.RESERVED;
                         printer.assignedOrderId = orderId;
                         printer.usageCount++;
-                        return printer.id;
+                        return printer.id; // sale sin hacer release, xq la impresora está tomada
                     }
                 }
             }
@@ -77,6 +84,7 @@ public final class PrinterPool {
         return snapshots;
     }
 
+    /** Encuentra una impresora por su id, lanza excepcion si no encuentra id */
     private Printer find(String id) {
         for (Printer[] row : printers) {
             for (Printer printer : row) {
@@ -88,6 +96,7 @@ public final class PrinterPool {
         throw new IllegalArgumentException("Impresora desconocida: " + id);
     }
 
+    /** Lanza una excepcion si la impresora no está reservada (está libre) */
     private static void requireReserved(Printer printer) {
         if (printer.state != PrinterState.RESERVED) {
             throw new IllegalStateException("La impresora " + printer.id + " no estaba reservada");
