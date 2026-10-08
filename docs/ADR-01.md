@@ -39,7 +39,7 @@ Listas protegidas por `synchronized`, con `wait()` cuando están vacías y `noti
 
 ## Decisión
 
-Elegimos la **Opción B**: `StageQueue<Order>` (FIFO + `Semaphore` + lock interno) para cada una de las 4 fronteras entre etapas, más un lock simple para el pool de impresoras y otro para el log de eventos. Esta elección se apoya en tres hilos concurrentes por etapa como máximo (config oficial: 2 o 3), donde el semáforo modela exactamente "cuántas órdenes hay esperando" sin que cada worker tenga que re-chequear una condición a mano.
+Elegimos la **Opción B**: `StageQueue<Order>` (FIFO + `Semaphore` + lock interno) para cada una de las 4 fronteras entre etapas, más un lock simple para el pool de impresoras y otro para el log de eventos. Se agrega un `Semaphore` de impresoras disponibles: asignación adquiere un permiso antes de reservar, y validación o impresión lo liberan cuando la impresora vuelve a `AVAILABLE`. Así se bloquea sin espera activa cuando todas están reservadas temporalmente —incluso con una sola impresora— sin incorporar espera dentro de `PrinterPool`. Esta elección se apoya en tres hilos concurrentes por etapa como máximo (config oficial: 2 o 3), donde el semáforo modela exactamente "cuántas órdenes hay esperando" sin que cada worker tenga que re-chequear una condición a mano.
 
 ## Diseño
 
@@ -51,7 +51,7 @@ Elegimos la **Opción B**: `StageQueue<Order>` (FIFO + `Semaphore` + lock intern
 | Órdenes `WAITING_VALIDATION`           | `waitingValidationQueue`       | ídem                                     | workers de asignación                                                          | 2 workers de validación  |
 | Órdenes `READY_TO_PRINT`               | `readyToPrintQueue`            | ídem                                     | workers de validación                                                          | 3 workers de impresión   |
 | Órdenes `PRINTED`                      | `printedQueue`                 | ídem                                     | workers de impresión                                                           | 2 workers de calidad     |
-| Matriz de impresoras                   | `PrinterPool`                  | `synchronized` (lock simple, sin espera) | workers de asignación (reservan), validación/impresión (liberan o inhabilitan) | todos los anteriores     |
+| Matriz de impresoras                   | `PrinterPool` + `availablePrinters` | `synchronized` + `Semaphore` | workers de asignación (reservan), validación/impresión (liberan o inhabilitan) | todos los anteriores     |
 | `eventos.csv` + contador `sequence`    | `EventLog`                     | `synchronized`                           | los 10 workers + `main`                                                        | — (solo escritura)       |
 | Contador de órdenes terminales         | `TerminationTracker`           | `synchronized` + `wait/notifyAll`        | workers de validación/impresión/calidad                                        | `main` (espera el total) |
 | Cierre de cada etapa                   | `StageBarrier` (uno por etapa) | `synchronized`                           | los workers de esa etapa                                                       | —                        |
@@ -60,7 +60,7 @@ Cada `Order` y `Printer` en sí **no tienen lock propio**: en todo momento, una 
 
 ### Condiciones de carrera identificadas y cómo se evitan
 
-- **Dos workers de asignación reservan la misma impresora**: evitado porque `reserveAny()` busca y marca `RESERVED` dentro de la misma sección `synchronized` de `PrinterPool` (INV-04).
+- **Dos workers de asignación reservan la misma impresora**: evitado porque se adquiere primero un permiso de `availablePrinters` y `reserveAny()` busca y marca `RESERVED` dentro de la misma sección `synchronized` de `PrinterPool` (INV-04). Al rechazar o imprimir con éxito se libera tanto la impresora como su permiso; una falla la deja fuera de servicio sin devolverlo.
 - **Una orden es tomada por dos workers de la misma etapa**: evitado porque `take()` de `StageQueue` hace `acquire()` + extracción de la lista como una operación atómica respecto a otros `take()`/`offer()` (INV-01, INV-03).
 - **El evento se escribe en un orden distinto al que ocurrió la transición**: evitado registrando en `EventLog.append(...)` (que asigna `sequence` y escribe) inmediatamente dentro de la misma sección lógica que confirma el cambio de estado, antes de soltar la orden hacia la siguiente cola (EVT-08).
 - **Una orden queda "perdida" entre que cambia de estado y se encola**: evitado porque el cambio de estado, el registro del evento y el `offer()` a la siguiente cola se hacen en secuencia dentro del mismo worker, sin que la orden pase por manos de otro hilo en el medio.
