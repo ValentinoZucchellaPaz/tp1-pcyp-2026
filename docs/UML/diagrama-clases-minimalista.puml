@@ -1,0 +1,66 @@
+@startuml
+title TP1 — Vista estructural de la solución
+skinparam classAttributeIconSize 0
+hide empty members
+left to right direction
+
+package "coordinación" {
+  class ConcurrentSimulation
+  class StartGate
+  class WorkerGroup
+  class TerminationTracker
+  class EventLog
+}
+
+package "pipeline" {
+  abstract class AbstractStageWorker
+  class AssignmentWorker
+  class ValidationWorker
+  class PrintingWorker
+  class QualityControlWorker
+  class StageQueue
+  class StageBarrier
+  class WorkItem
+}
+
+package "datos" {
+  class Order
+}
+
+package "recursos" {
+  class PrinterPool
+  class Printer
+}
+
+ConcurrentSimulation *-- "4" StageQueue
+ConcurrentSimulation *-- PrinterPool
+ConcurrentSimulation *-- StartGate
+ConcurrentSimulation *-- WorkerGroup
+ConcurrentSimulation *-- TerminationTracker
+ConcurrentSimulation *-- EventLog
+
+AbstractStageWorker <|-- AssignmentWorker
+AbstractStageWorker <|-- ValidationWorker
+AbstractStageWorker <|-- PrintingWorker
+AbstractStageWorker <|-- QualityControlWorker
+AbstractStageWorker --> StartGate : inicio conjunto
+AbstractStageWorker --> StageQueue : consume
+AbstractStageWorker --> StageBarrier : cierre
+
+StageQueue *-- WorkItem
+WorkItem --> Order
+PrinterPool *-- Printer
+
+note bottom of AbstractStageWorker
+run() común: espera, toma,
+demora, píldora y cierre.
+Cada subclase define su negocio.
+end note
+
+note bottom of AssignmentWorker
+Asignación reserva impresora.
+Validación e impresión resuelven
+su liberación o inhabilitación.
+Calidad completa la orden.
+end note
+@enduml
