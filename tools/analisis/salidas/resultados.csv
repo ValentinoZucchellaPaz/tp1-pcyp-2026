@@ -1,0 +1,6 @@
+﻿"scenario","variant","run","durationMillis","approved","rejected","printFailed","defective","assign","valid","print","quality","dAssign","dValid","dPrint","dQuality"
+"official","official","1","30589","359","71","45","25","3","2","3","2","50","120","180","80"
+"official","official","2","30574","359","71","45","25","3","2","3","2","50","120","180","80"
+"official","official","3","30896","359","71","45","25","3","2","3","2","50","120","180","80"
+"official","official","4","31854","359","71","45","25","3","2","3","2","50","120","180","80"
+"official","official","5","31899","359","71","45","25","3","2","3","2","50","120","180","80"

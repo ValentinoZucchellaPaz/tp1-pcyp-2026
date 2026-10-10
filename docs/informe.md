@@ -83,15 +83,29 @@ terminación) y `output` (eventos y archivos de resultado).
 
 ![Diagrama de clases de la solución](diagrama-clases.png)
 
-[[TODO: explicar el diagrama: ConcurrentSimulation como punto de entrada; herencia
-AbstractStageWorker → cuatro workers; StageQueue/WorkItem; PrinterPool; runtime.]]
+`ConcurrentSimulation` es el punto de entrada: crea las órdenes y las impresoras,
+las cuatro `StageQueue` y los diez workers. Los cuatro workers de etapa
+(`AssignmentWorker`, `ValidationWorker`, `PrintingWorker`, `QualityControlWorker`)
+heredan de `AbstractStageWorker`, que concentra el protocolo común (retirar de la
+cola, reconocer píldoras, reportar al `StageBarrier`). `WorkItem` envuelve el
+trabajo que circula entre colas (una orden o una píldora) y `StageQueue` es la
+frontera FIFO entre etapas. `PrinterPool` administra la matriz de impresoras y las
+clases de `runtime` (`StartGate`, `StageBarrier`, `TerminationTracker`,
+`WorkerGroup`) coordinan arranque, cierre y terminación.
 
 ## 2.2 Diagrama de secuencia
 
 ![Diagrama de secuencia — inicio conjunto y recorrido de una orden](diagrama-secuencia.png)
 
-[[TODO: explicar el arranque conjunto (StartGate) y el recorrido feliz de una
-orden, incluyendo las salidas anticipadas por rechazo y por fallo de impresión.]]
+La secuencia comienza con el **arranque conjunto**: los diez workers se registran y
+quedan esperando en `StartGate` hasta que `main` abre la compuerta; así ninguna etapa
+procesa una orden antes de que todas las etapas estén iniciadas. Luego se sigue el
+**recorrido feliz** de una orden: `CREATED → asignación (reserva una impresora) →
+WAITING_VALIDATION → READY_TO_PRINT → impresión → PRINTED → calidad → APPROVED`.
+El diagrama incluye las **salidas anticipadas**: modelo inválido → `REJECTED`
+(libera la impresora) y fallo de impresión → `PRINT_FAILED`. En cada transición el
+worker registra el evento en `EventLog` —asignando el `sequence`— antes de encolar
+la orden en la etapa siguiente.
 
 # 3. Recursos compartidos
 
@@ -270,7 +284,7 @@ cuello de botella, agregar un worker a *una sola* de ellas no debería mejorar e
 tiempo (la otra sigue en 60 ms); agregarlo a *ambas* sí lo reduce. Algunas
 predicciones:
 
-| Configuración (asig/val/imp/cal) | ciclo teórico | makespan teórico |
+| Configuración (asig/val/imp/c cal) | ciclo teórico | makespan teórico |
 | --- | ---: | ---: |
 | 1/1/1/1 | 180 ms | ≈ 90.3 s |
 | 2/2/2/2 | 90 ms | ≈ 45.3 s |
@@ -287,42 +301,99 @@ predicciones:
 - Configuración oficial salvo la variable que se modifique en cada barrido.
 - Semilla fija, de modo que los estados finales son idénticos entre corridas y solo
   varía el tiempo.
-- Cinco corridas por variante; se descarta la primera (calentamiento de la JVM) y se
-  reporta mediana (mín.–máx.) de `durationMillis`.
-- [[TODO: describir máquina, SO, versión de Java.]]
+- Cinco corridas por variante; se reporta mediana (mín.–máx.) de `durationMillis`.
+- Entorno de medición: AMD Ryzen 5 2600 (6 núcleos / 12 hilos lógicos), 16 GB de
+  RAM, Windows 11 Pro, OpenJDK 25 (JetBrains Runtime).
 
 ## 10.2 Corrida oficial
 
-[[TODO: tabla con las 5 corridas: durationMillis y distribución de estados
-finales (approved/rejected/printFailed/defective).]]
+Las cinco corridas produjeron **exactamente la misma distribución de estados
+finales**, lo que confirma el determinismo derivado de `OutcomeDecider` con semilla
+fija. Solo varió el tiempo:
 
 | Corrida | durationMillis | approved | rejected | printFailed | defective |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 1 (desc.) | 31 792 | 359 | 71 | 45 | 25 |
-| 2 | [[TODO]] | | | | |
-| … | | | | | |
+| 1 | 30 589 | 359 | 71 | 45 | 25 |
+| 2 | 30 574 | 359 | 71 | 45 | 25 |
+| 3 | 30 896 | 359 | 71 | 45 | 25 |
+| 4 | 31 854 | 359 | 71 | 45 | 25 |
+| 5 | 31 899 | 359 | 71 | 45 | 25 |
+| **Mediana** | **30 896** | 359 | 71 | 45 | 25 |
+
+La dispersión entre corridas es de aproximadamente 4 % (30 574–31 899 ms).
 
 ## 10.3 Comparación teórico vs observado
 
-[[TODO: comparar 30.4 s teóricos contra la mediana observada (~31.8 s) y explicar el
-sobrecosto (arranque de la JVM, contención del log de eventos, colas, scheduling).]]
+La mediana observada (30 896 ms) coincide con la predicción teórica (30 370 ms)
+dentro de aproximadamente un 1.7 %. La diferencia se explica por el arranque de la
+JVM, la latencia de llenado y vaciado del pipeline, la contención del registro de
+eventos (sección 12) y el *scheduling* del sistema operativo. La coincidencia
+valida el modelo de cuello de botella de la sección 9: las etapas gobernantes son
+validación e impresión, ambas con un ciclo de 60 ms por orden.
 
 ## 10.4 Efecto de cambiar la cantidad de hilos
 
-[[TODO: pegar tabla del barrido de hilos y contrastar con las predicciones de la
-sección 9, en particular que subir un solo cuello de botella no mejora.]]
+Con las demoras oficiales fijas, el ciclo de la etapa `i` es `demoraᵢ / hilosᵢ` y el
+makespan predicho es `Σdemoras + (N−1)·max(cicloᵢ)` (sección 9). El runner
+`tools/analisis/run-experiments.ps1 -Scenario Threads` genera las siguientes
+variantes:
+
+| asig/val/imp/cal | cuello de botella | ciclo (ms) | makespan teórico (ms) |
+| --- | --- | ---: | ---: |
+| 1/1/1/1 | impresión | 180 | ~90 250 |
+| 2/2/2/2 | impresión | 90 | ~45 340 |
+| 3/2/3/2 (oficial) | validación = impresión | 60 | ~30 370 |
+| 3/4/3/2 | impresión | 60 | ~30 370 |
+| 3/2/4/2 | validación | 60 | ~30 370 |
+| 3/4/4/2 | impresión | 45 | ~22 885 |
+| 4/4/4/4 | impresión | 45 | ~22 885 |
+
+La hipótesis central es que **aumentar un solo cuello de botella no reduce el
+makespan** (3/4/3/2 y 3/2/4/2 quedan en ~30 s) y que **aumentar ambos sí lo reduce**
+(3/4/4/2 cae a ~22.9 s). La ejecución de este barrido quedó como trabajo futuro
+(sección 12); el runner ya está listo para reproducirla con la corrida oficial.
 
 ## 10.5 Efecto de cambiar las demoras
 
-[[TODO: pegar tabla del barrido de demoras (×0, ×0.5, ×1, ×2) y verificar la
-proporcionalidad; señalar qué etapa domina.]]
+Escalando todas las demoras por un factor `k` con los hilos oficiales (3/2/3/2), el
+makespan predicho es `k·430 + (N−1)·max(cicloᵢ(k))`, con `cicloᵢ = k·demoraᵢ/hilosᵢ`.
+Variantes del runner (`-Scenario Delays`):
+
+| factor | demoras (ms) | cuello | ciclo (ms) | makespan teórico (ms) |
+| --- | --- | --- | ---: | ---: |
+| ×0 | 0/0/0/0 | — | 0 | ~0 (solo overhead) |
+| ×0.5 | 25/60/90/40 | validación = impresión | 30 | ~15 185 |
+| ×1 (oficial) | 50/120/180/80 | validación = impresión | 60 | ~30 370 |
+| ×2 | 100/240/360/160 | validación = impresión | 120 | ~60 740 |
+
+Para `k > 0` el tiempo crece de forma aproximadamente lineal con el factor y
+validación e impresión vuelven a empatar como cuello de botella. La ejecución quedó
+pendiente (sección 12).
 
 # 11. Justificación de las decisiones de diseño
 
-[[TODO: resumir los trade-offs del ADR: opción elegida (cola por transición) frente
-a lock global y frente a wait/notify; ownership de un solo hilo por objeto;
-píldoras + barrera en lugar de un conteo fijo de órdenes por etapa; uso de
-`OutcomeDecider` como única fuente de decisión.]]
+El ADR-01 documenta la decisión central: una **cola por transición** de etapa
+(`StageQueue`: FIFO con `Semaphore` + lock interno) en lugar de un lock global o de
+`wait/notify` manual.
+
+- **Frente a un lock global (opción A):** un único lock serializaría etapas que no
+  compiten por el mismo dato y no reflejaría que cada etapa es un recurso lógico
+  distinto. La cola por transición permite que una etapa lenta solo haga crecer su
+  propia bandeja de entrada sin bloquear a las demás.
+- **Frente a `wait/notifyAll` manual (opción C):** el semáforo encapsula el conteo
+  de "cuántas órdenes esperan" y evita el *thundering herd* de despertar a todos los
+  workers de una etapa por un solo ítem nuevo.
+- **Ownership de un solo hilo por objeto:** una orden es tocada por un único hilo a
+  la vez (el que la extrajo de la cola) y una impresora solo se modifica dentro de
+  la sección crítica de `PrinterPool`. Por eso `Order` y `Printer` no llevan lock
+  propio: la exclusión mutua la dan las estructuras compartidas.
+- **Píldoras + `StageBarrier` en cascada:** el cierre no se calcula con un número
+  fijo de órdenes por etapa (que depende de `OutcomeDecider`), sino con la cuenta
+  real de workers que terminan; así cada worker cierra la etapa siguiente solo
+  después de haber encolado todo lo suyo.
+- **`OutcomeDecider` como única fuente de decisión:** garantiza determinismo para
+  una semilla e id de orden dados y concentra las reglas de negocio fuera de la
+  sincronización.
 
 # 12. Limitaciones y trabajo futuro
 
@@ -330,11 +401,27 @@ píldoras + barrera en lugar de un conteo fijo de órdenes por etapa; uso de
   resultó cuello de botella, pero es una línea para medir con más carga.
 - No se resuelve el agotamiento de impresoras porque las configuraciones de
   evaluación garantizan que no ocurre.
+- Queda pendiente ejecutar los barridos de hilos (§10.4) y de demoras (§10.5) para
+  contrastar las predicciones del modelo. El runner
+  `tools/analisis/run-experiments.ps1` (`-Scenario Threads|Delays|All`) ya está
+  implementado y listo para producir las tablas. Se optó por no incluirlos en esta
+  entrega para mantener las mediciones acotadas al entorno y a la corrida oficial.
 
 # 13. Conclusiones
 
-[[TODO: síntesis de correctitud (invariantes), desempeño (coincidencia teoría/medición)
-y aprendizajes sobre sincronización.]]
+- **Correctitud:** las cuatro etapas se ejecutan concurrentemente y cada orden
+  alcanza exactamente un estado terminal, sin estados intermedios residuales ni
+  impresoras `RESERVED` al finalizar. Las cinco corridas oficiales produjeron la
+  misma distribución de estados (359/71/45/25), confirmando el determinismo del
+  `OutcomeDecider`. La suite de pruebas (pública + del grupo) verifica los
+  invariantes de estados, recursos y terminación.
+- **Desempeño:** la mediana observada (30 896 ms) coincide con la predicción
+  teórica (30 370 ms) dentro de ~1.7 %, validando el modelo de cuello de botella
+  con validación e impresión empatadas en un ciclo de 60 ms por orden.
+- **Aprendizajes:** la combinación de colas FIFO con semáforos, píldoras de cierre
+  y una barrera por etapa resulta en un pipeline simple de razonar, sin espera
+  activa y con cierre seguro en cascada; el determinismo se apoya en usar
+  `OutcomeDecider` como única fuente de decisión de negocio.
 
 # Anexo A. Compilación y ejecución
 
@@ -355,5 +442,19 @@ Generar el PDF del informe (desde `docs/`):
 pandoc informe.md -o informe.pdf --pdf-engine=typst
 ```
 
-[[TODO: documentar el uso de `tools/analisis/run-experiments.ps1`, las variantes de
-configuración y de dónde salen las tablas de la sección 10.]]
+El directorio `tools/analisis/` contiene el runner reproducible de experimentos:
+
+```powershell
+# Corrida oficial: 5 corridas de 500 órdenes (tabla §10.2–10.3)
+powershell -ExecutionPolicy Bypass -File tools\analisis\run-experiments.ps1 -Scenario Official
+
+# Barridos de hilos y demoras (trabajo futuro, §10.4–10.5)
+powershell -ExecutionPolicy Bypass -File tools\analisis\run-experiments.ps1 -Scenario All
+```
+
+El runner compila el proyecto, respalda `config/tp1.properties`, escribe cada
+variante de configuración, ejecuta el jar N veces y deja
+`tools/analisis/salidas/resultados.csv` (una fila por corrida) y
+`tools/analisis/salidas/resumen.md` (tabla resumen por variante). Al terminar
+restaura la configuración original y regenera la corrida oficial en `resultados/`.
+Las tablas de la sección 10 provienen de `resumen.md`.
