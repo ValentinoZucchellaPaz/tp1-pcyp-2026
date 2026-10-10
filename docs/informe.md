@@ -14,15 +14,15 @@ lang: es
 # Integrantes y repositorio
 
 | Nombre | Documento | Usuario Git |
-| --- | --- | --- |
-| Rafael Barrio | [[TODO]] | [[TODO]] |
-| Alexis Tomás Garay | [[TODO]] | [[TODO]] |
-| Pedro Guzman Gonzalez | [[TODO]] | [[TODO]] |
-| Santino Chesta | [[TODO]] | [[TODO]] |
-| Valentino Zuchella Paz | [[TODO]] | [[TODO]] |
+| --- |-----------| --- |
+| Rafael Barrio | 46472542  | Rafa-Barrio |
+| Alexis Tomás Garay | 46032555  | Garay1913 |
+| Pedro Guzman Gonzalez | 46068277  | PedroGuzmanGonzalez |
+| Santino Chesta | [[TODO]]  | SantinoChesta |
+| Valentino Zuchella Paz | [[TODO]]  | ValentinoZucchellaPaz |
 
 - **Grupo:** Warrior-of-Interruptions
-- **Repositorio:** [[TODO: URL]]
+- **Repositorio:** https://github.com/ValentinoZucchellaPaz/tp1-pcyp-2026.git
 - **Tag de entrega:** `Warrior-of-Interruptions-entrega-tp1`
 
 # 1. Introducción y objetivo
