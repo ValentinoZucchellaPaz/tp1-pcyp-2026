@@ -84,18 +84,22 @@ public final class PrinterPool {
         return snapshots;
     }
 
-    /** Encuentra una impresora por su id, lanza excepcion si no encuentra id */
+    /** Encuentra una impresora en O(1) a partir de sus coordenadas en el ID (P-fila-columna). */
     private Printer find(String id) {
-        for (Printer[] row : printers) {
-            for (Printer printer : row) {
-                if (printer.id.equals(id)) {
-                    return printer;
+        String[] parts = id.split("-");
+        if (parts.length == 3 && "P".equals(parts[0])) {
+            try {
+                int row = Integer.parseInt(parts[1]);
+                int col = Integer.parseInt(parts[2]);
+                if (row >= 0 && row < printers.length && col >= 0 && col < printers[0].length) {
+                    return printers[row][col];
                 }
+            } catch (NumberFormatException ignored) {
+                // Formato no numérico
             }
         }
         throw new IllegalArgumentException("Impresora desconocida: " + id);
     }
-
     /** Lanza una excepcion si la impresora no está reservada (está libre) */
     private static void requireReserved(Printer printer) {
         if (printer.state != PrinterState.RESERVED) {
