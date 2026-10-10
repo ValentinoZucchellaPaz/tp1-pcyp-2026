@@ -35,11 +35,28 @@ public final class Order {
     public void recordPrinting() { printingCount++; }
     public void recordQualityControl() { qualityControlCount++; }
 
-    /** Cambia de estado y devuelve el anterior para registrarlo en el log. */
+    /** 
+     * Cambia de estado verificando que la transición sea válida según las reglas del pipeline.
+     * Devuelve el estado anterior para registrarlo en el log de eventos.
+     */
     public OrderState transitionTo(OrderState target) {
-        // poner validacion?
-        OrderState previous = state;
-        state = target;
+        validateTransition(this.state, target); // -> Actua como "guardia de seguridad"
+        OrderState previous = this.state;       // Guarda estado previo
+        this.state = target;                    // Aplica el estado nuevo
         return previous;
+    }
+
+    private void validateTransition(OrderState from, OrderState to) {
+        boolean valid = switch (from) {
+            case CREATED -> to == OrderState.WAITING_VALIDATION;
+            case WAITING_VALIDATION -> to == OrderState.READY_TO_PRINT || to == OrderState.REJECTED;
+            case READY_TO_PRINT -> to == OrderState.PRINTED || to == OrderState.PRINT_FAILED;
+            case PRINTED -> to == OrderState.APPROVED || to == OrderState.DEFECTIVE;
+            default -> false; // Ningún estado terminal (APPROVED, REJECTED, etc.) puede cambiar de estado
+        };
+
+        if (!valid) {
+            throw new IllegalStateException("Transición inválida para la orden " + id + ": de " + from + " a " + to);
+        }
     }
 }
