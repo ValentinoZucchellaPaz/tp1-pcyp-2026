@@ -1,0 +1,45 @@
+@startuml diagrama-secuencia-4-terminacion
+title TP1 — 4) Terminación en cascada
+autonumber
+
+actor Main
+participant "AssignmentWorker (x3)" as AW
+participant "StageBarrier asignación" as BA
+participant "ValidationWorker (x2)" as VW
+participant "StageBarrier validación" as BV
+participant "PrintingWorker (x3)" as PW
+participant "StageBarrier impresión" as BP
+participant "QualityControlWorker (x2)" as QW
+participant "StageBarrier calidad" as BQ
+participant "TerminationTracker" as TT
+participant "EventLog" as EL
+
+Main -> AW : offerPoison(3) tras las órdenes reales
+note over AW : cada worker consume exactamente una píldora
+AW -> BA : workerFinished()
+BA --> AW : true (soy el último)
+AW -> VW : offerPoison(2)
+
+VW -> BV : workerFinished()
+BV --> VW : true (soy el último)
+VW -> PW : offerPoison(3)
+
+PW -> BP : workerFinished()
+BP --> PW : true (soy el último)
+PW -> QW : offerPoison(2)
+
+QW -> BQ : workerFinished()
+BQ --> QW : true (soy el último)
+note over QW : Calidad no tiene etapa siguiente;\nel último worker simplemente termina.
+
+note over Main, TT
+  En paralelo, cada orden terminal llama a
+  TerminationTracker.orderCompleted().
+end note
+
+Main -> TT : awaitAll() espera las N órdenes
+TT --> Main : notifyAll() al llegar a N
+Main -> Main : joinAll() de los 10 hilos
+Main -> EL : close()
+
+@enduml
