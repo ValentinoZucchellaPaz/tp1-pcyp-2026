@@ -3,6 +3,7 @@ title TP1 — 1) Arranque conjunto (StartGate)
 autonumber
 
 actor Main
+participant ConcurrentSimulation as CS
 participant WorkerGroup as WG
 participant StartGate as SG
 participant "AssignmentWorker (3)" as AW
@@ -10,8 +11,9 @@ participant "ValidationWorker (2)" as VW
 participant "PrintingWorker (3)" as PW
 participant "QualityControlWorker (2)" as QW
 
-Main -> WG : add(nombre, tarea) x10
-Main -> WG : startAll()
+Main -> CS : execute(config)
+CS -> WG : add(nombre, tarea) x10 (registerWorkers)
+CS -> WG : startAll()
 WG -> AW : run()
 WG -> VW : run()
 WG -> PW : run()
@@ -22,7 +24,7 @@ VW -> SG : awaitOpen()
 PW -> SG : awaitOpen()
 QW -> SG : awaitOpen()
 
-Main -> SG : openWhenAllWorkersAreReady()
+CS -> SG : openWhenAllWorkersAreReady()
 SG --> AW : notifyAll() (open = true)
 SG --> VW : notifyAll()
 SG --> PW : notifyAll()
