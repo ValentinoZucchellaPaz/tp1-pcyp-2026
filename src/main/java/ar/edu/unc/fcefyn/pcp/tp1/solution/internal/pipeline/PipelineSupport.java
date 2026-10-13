@@ -28,7 +28,9 @@ final class PipelineSupport {
      */
     static void transition(EventLog log, Order order, String stage, OrderState target,
             String printerId) {
-        OrderState previous = order.transitionTo(target);
-        log.transition(Thread.currentThread().getName(), order.id(), stage, previous, target, printerId);
+        synchronized(log){
+            OrderState previous = order.transitionTo(target);
+            log.transition(Thread.currentThread().getName(), order.id(), stage, previous, target, printerId);
+        }
     }
 }
