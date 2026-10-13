@@ -1,0 +1,28 @@
+@startuml diagrama-secuencia-3-salidas
+title TP1 — 3) Salidas anticipadas
+autonumber
+
+participant "ValidationWorker" as VW
+participant "PrintingWorker" as PW
+participant "PrinterPool" as PP
+participant "EventLog" as EL
+participant "TerminationTracker" as TT
+
+== Modelo inválido: rechazo ==
+VW -> EL : WAITING_VALIDATION -> REJECTED
+VW -> PP : release(printerId)
+VW -> TT : orderCompleted()
+
+== Fallo de impresión ==
+PW -> EL : READY_TO_PRINT -> PRINT_FAILED
+PW -> PP : markOutOfService(printerId)
+PW -> TT : orderCompleted()
+
+note over PP
+  release: la impresora vuelve a AVAILABLE
+  y devuelve su permiso al semáforo.
+  markOutOfService: pasa a OUT_OF_SERVICE
+  y NO devuelve el permiso (no se reutiliza).
+end note
+
+@enduml
