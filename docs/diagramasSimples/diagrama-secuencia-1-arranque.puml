@@ -1,0 +1,37 @@
+@startuml diagrama-secuencia-1-arranque
+title TP1 — 1) Arranque conjunto (StartGate)
+autonumber
+
+actor Main
+participant WorkerGroup as WG
+participant StartGate as SG
+participant "AssignmentWorker (3)" as AW
+participant "ValidationWorker (2)" as VW
+participant "PrintingWorker (3)" as PW
+participant "QualityControlWorker (2)" as QW
+
+Main -> WG : add(nombre, tarea) x10
+Main -> WG : startAll()
+WG -> AW : run()
+WG -> VW : run()
+WG -> PW : run()
+WG -> QW : run()
+
+AW -> SG : awaitOpen()
+VW -> SG : awaitOpen()
+PW -> SG : awaitOpen()
+QW -> SG : awaitOpen()
+
+Main -> SG : openWhenAllWorkersAreReady()
+SG --> AW : notifyAll() (open = true)
+SG --> VW : notifyAll()
+SG --> PW : notifyAll()
+SG --> QW : notifyAll()
+
+note over SG
+  Ninguna etapa procesa una orden
+  hasta que TODAS las etapas se
+  registraron. El arranque es conjunto.
+end note
+
+@enduml

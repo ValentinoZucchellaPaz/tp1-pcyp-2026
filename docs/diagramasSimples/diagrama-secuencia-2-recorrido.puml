@@ -1,0 +1,48 @@
+@startuml diagrama-secuencia-2-recorrido
+title TP1 — 2) Recorrido feliz de una orden
+autonumber
+
+actor Main
+participant "createdQueue" as CQ
+participant "AssignmentWorker" as AW
+participant "validationQueue" as VQ
+participant "ValidationWorker" as VW
+participant "printingQueue" as PQ
+participant "PrintingWorker" as PW
+participant "qualityQueue" as QQ
+participant "QualityControlWorker" as QW
+participant "PrinterPool" as PP
+participant "EventLog" as EL
+participant "TerminationTracker" as TT
+
+Main -> CQ : offerOrder(orden)
+CQ -> AW : take() (espera permiso del semáforo)
+AW -> AW : delay(50 ms)
+AW -> PP : reserveFor(orderId) : printerId
+AW -> EL : CREATED -> WAITING_VALIDATION
+AW -> VQ : offerOrder(orden)
+
+VQ -> VW : take()
+VW -> VW : delay(120 ms)
+VW -> EL : WAITING_VALIDATION -> READY_TO_PRINT
+VW -> PQ : offerOrder(orden)
+
+PQ -> PW : take()
+PW -> PW : delay(180 ms)
+PW -> EL : READY_TO_PRINT -> PRINTED
+PW -> PP : release(printerId)
+PW -> QQ : offerOrder(orden)
+
+QQ -> QW : take()
+QW -> QW : delay(80 ms)
+QW -> EL : PRINTED -> APPROVED
+QW -> TT : orderCompleted()
+
+note over CQ, QQ
+  Cada StageQueue es FIFO protegida por
+  monitor + Semaphore: el productor inserta
+  y luego libera el permiso; el consumidor
+  lo adquiere y retira (sin espera activa).
+end note
+
+@enduml

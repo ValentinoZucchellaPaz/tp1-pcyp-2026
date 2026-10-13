@@ -19,7 +19,7 @@ lang: es
 | Alexis Tomás Garay | 46032555  | Garay1913 |
 | Pedro Guzman Gonzalez | 46068277  | PedroGuzmanGonzalez |
 | Santino Chesta | [[TODO]]  | SantinoChesta |
-| Valentino Zuchella Paz | [[TODO]]  | ValentinoZucchellaPaz |
+| Valentino Zucchella Paz | 44578880 | ValentinoZucchellaPaz |
 
 - **Grupo:** Warrior-of-Interruptions
 - **Repositorio:** https://github.com/ValentinoZucchellaPaz/tp1-pcyp-2026.git
