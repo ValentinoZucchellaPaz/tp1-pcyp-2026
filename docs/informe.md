@@ -18,7 +18,7 @@ lang: es
 | Rafael Barrio | 46472542  | Rafa-Barrio |
 | Alexis Tomás Garay | 46032555  | Garay1913 |
 | Pedro Guzman Gonzalez | 46068277  | PedroGuzmanGonzalez |
-| Santino Chesta | [[TODO]]  | SantinoChesta |
+| Santino Chesta | 45711131  | SantinoChesta |
 | Valentino Zucchella Paz | 44578880 | ValentinoZucchellaPaz |
 
 - **Grupo:** Warrior-of-Interruptions
