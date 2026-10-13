@@ -38,10 +38,7 @@ Los objetivos son: (i) que las cuatro etapas funcionen **concurrentemente**,
 procesen conservando la consistencia de sus estados y (iv) que la simulación
 finalice sin dejar hilos activos ni impresoras reservadas.
 
-El sistema se implementa en Java 21 con Maven. La decisión de validación,
-impresión y calidad se delega exclusivamente en `OutcomeDecider`, provisto por la
-cátedra, de modo que el resultado final de cada orden es determinista para una
-semilla e identificador dados.
+
 
 # 2. Arquitectura general
 
@@ -73,11 +70,7 @@ al comienzo**: cada worker se registra y espera en una compuerta común
 (`StartGate`) hasta que el principal confirma que los diez están listos y la abre.
 De este modo ninguna etapa procesa una orden antes de que todas hayan arrancado.
 
-El código se divide en un contrato fijo (`ar.edu.unc.fcefyn.pcp.tp1.api`, provisto
-por la cátedra y no modificado) y la implementación propia bajo `solution.internal`,
-subdividida en `model` (estado de las órdenes), `pipeline` (colas, workers,
-píldoras), `resource` (matriz de impresoras), `runtime` (arranque, ciclo de vida y
-terminación) y `output` (eventos y archivos de resultado).
+
 
 ## 2.1 Diagrama de clases
 
@@ -395,19 +388,8 @@ El ADR-01 documenta la decisión central: una **cola por transición** de etapa
   una semilla e id de orden dados y concentra las reglas de negocio fuera de la
   sincronización.
 
-# 12. Limitaciones y trabajo futuro
 
-- El registro de eventos es un punto de serialización global; con demoras reales no
-  resultó cuello de botella, pero es una línea para medir con más carga.
-- No se resuelve el agotamiento de impresoras porque las configuraciones de
-  evaluación garantizan que no ocurre.
-- Queda pendiente ejecutar los barridos de hilos (§10.4) y de demoras (§10.5) para
-  contrastar las predicciones del modelo. El runner
-  `tools/analisis/run-experiments.ps1` (`-Scenario Threads|Delays|All`) ya está
-  implementado y listo para producir las tablas. Se optó por no incluirlos en esta
-  entrega para mantener las mediciones acotadas al entorno y a la corrida oficial.
-
-# 13. Conclusiones
+# 12. Conclusiones
 
 - **Correctitud:** las cuatro etapas se ejecutan concurrentemente y cada orden
   alcanza exactamente un estado terminal, sin estados intermedios residuales ni
@@ -423,38 +405,4 @@ El ADR-01 documenta la decisión central: una **cola por transición** de etapa
   activa y con cierre seguro en cascada; el determinismo se apoya en usar
   `OutcomeDecider` como única fuente de decisión de negocio.
 
-# Anexo A. Compilación y ejecución
 
-```bash
-mvn clean test          # suite pública + tests del grupo
-mvn clean package       # genera target/tp1.jar
-java -jar target/tp1.jar
-```
-
-La aplicación siempre lee `config/tp1.properties`; `Simulation.execute(config)` usa
-exclusivamente la configuración recibida.
-
-# Anexo B. Reproducción del informe y de los experimentos
-
-Generar el PDF del informe (desde `docs/`):
-
-```bash
-pandoc informe.md -o informe.pdf --pdf-engine=typst
-```
-
-El directorio `tools/analisis/` contiene el runner reproducible de experimentos:
-
-```powershell
-# Corrida oficial: 5 corridas de 500 órdenes (tabla §10.2–10.3)
-powershell -ExecutionPolicy Bypass -File tools\analisis\run-experiments.ps1 -Scenario Official
-
-# Barridos de hilos y demoras (trabajo futuro, §10.4–10.5)
-powershell -ExecutionPolicy Bypass -File tools\analisis\run-experiments.ps1 -Scenario All
-```
-
-El runner compila el proyecto, respalda `config/tp1.properties`, escribe cada
-variante de configuración, ejecuta el jar N veces y deja
-`tools/analisis/salidas/resultados.csv` (una fila por corrida) y
-`tools/analisis/salidas/resumen.md` (tabla resumen por variante). Al terminar
-restaura la configuración original y regenera la corrida oficial en `resultados/`.
-Las tablas de la sección 10 provienen de `resumen.md`.
