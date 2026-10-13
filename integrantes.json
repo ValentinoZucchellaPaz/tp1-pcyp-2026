@@ -1,11 +1,31 @@
 {
-  "grupo": "REEMPLAZAR_CON_NOMBRE_DEL_GRUPO",
-  "repositorio": "REEMPLAZAR_CON_URL_DEL_REPOSITORIO",
+  "grupo": "Warrior-of-Interruptions",
+  "repositorio": "https://github.com/ValentinoZucchellaPaz/tp1-pcyp-2026",
   "integrantes": [
     {
-      "nombre": "REEMPLAZAR",
-      "documento": "REEMPLAZAR",
-      "usuarioGit": "REEMPLAZAR"
+      "nombre": "Rafael Barrio",
+      "documento": "46.472.542",
+      "usuarioGit": "Rafa-Barrio"
+    },
+    {
+      "nombre": "Alexis Tomás Garay",
+      "documento": "46.032.555",
+      "usuarioGit": "Garay1913"
+    },
+    {
+      "nombre": "Pedro Guzmán Gonzalez",
+      "documento": "46.068.277",
+      "usuarioGit": "PedroGuzmanGonzalez"
+    },
+    {
+      "nombre": "Santino Chesta",
+      "documento": "45.711.131",
+      "usuarioGit": "SantinoChesta"
+    },
+    {
+      "nombre": "Valentino Zucchella Paz",
+      "documento": "44.578.880",
+      "usuarioGit": "ValentinoZucchellaPaz"
     }
   ]
 }
