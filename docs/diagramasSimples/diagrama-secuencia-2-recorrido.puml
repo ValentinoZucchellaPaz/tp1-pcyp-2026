@@ -2,7 +2,7 @@
 title TP1 — 2) Recorrido feliz de una orden
 autonumber
 
-actor Main
+actor ConcurrentSimulation as CS
 participant "createdQueue" as CQ
 participant "AssignmentWorker" as AW
 participant "validationQueue" as VQ
@@ -14,27 +14,36 @@ participant "QualityControlWorker" as QW
 participant "PrinterPool" as PP
 participant "EventLog" as EL
 participant "TerminationTracker" as TT
+participant "OutcomeDecider (api)" as OD
 
-Main -> CQ : offerOrder(orden)
-CQ -> AW : take() (espera permiso del semáforo)
+note over CS
+  Se muestra el recorrido lógico de UNA orden.
+  Las 4 etapas corren en simultáneo sobre la misma cola.
+end note
+
+CS -> CQ : offerOrder(orden) x500
+AW -> CQ : take()
 AW -> AW : delay(50 ms)
 AW -> PP : reserveFor(orderId) : printerId
 AW -> EL : CREATED -> WAITING_VALIDATION
 AW -> VQ : offerOrder(orden)
 
-VQ -> VW : take()
+VW -> VQ : take()
 VW -> VW : delay(120 ms)
+VW -> OD : isModelValid(id, config) : true
 VW -> EL : WAITING_VALIDATION -> READY_TO_PRINT
 VW -> PQ : offerOrder(orden)
 
-PQ -> PW : take()
+PW -> PQ : take()
 PW -> PW : delay(180 ms)
+PW -> OD : isPrintSuccessful(id, config) : true
 PW -> EL : READY_TO_PRINT -> PRINTED
 PW -> PP : release(printerId)
 PW -> QQ : offerOrder(orden)
 
-QQ -> QW : take()
+QW -> QQ : take()
 QW -> QW : delay(80 ms)
+QW -> OD : isQualityApproved(id, config) : true
 QW -> EL : PRINTED -> APPROVED
 QW -> TT : orderCompleted()
 
@@ -43,6 +52,13 @@ note over CQ, QQ
   monitor + Semaphore: el productor inserta
   y luego libera el permiso; el consumidor
   lo adquiere y retira (sin espera activa).
+end note
+
+note over AW, QW
+  Cada decisión se delega en OutcomeDecider (api),
+  determinista por seed + orderId.
+  El resto de terminaciones (REJECTED / PRINT_FAILED /
+  DEFECTIVE) se detalla en el diagrama 3.
 end note
 
 @enduml
