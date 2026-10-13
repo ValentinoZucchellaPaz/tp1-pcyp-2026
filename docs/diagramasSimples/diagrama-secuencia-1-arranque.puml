@@ -14,10 +14,17 @@ participant "QualityControlWorker (2)" as QW
 Main -> CS : execute(config)
 CS -> WG : add(nombre, tarea) x10 (registerWorkers)
 CS -> WG : startAll()
-WG -> AW : run()
-WG -> VW : run()
-WG -> PW : run()
-WG -> QW : run()
+WG -> AW : start()
+WG -> VW : start()
+WG -> PW : start()
+WG -> QW : start()
+
+note over WG
+  start() lanza el hilo; la JVM invoca
+  run() dentro del hilo nuevo
+  (AbstractStageWorker.run), que
+  empieza con awaitOpen().
+end note
 
 AW -> SG : awaitOpen()
 VW -> SG : awaitOpen()
