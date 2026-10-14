@@ -6,7 +6,7 @@ author:
   - Alexis Tomás Garay
   - Pedro Guzman Gonzalez
   - Santino Chesta
-  - Valentino Zuchella Paz
+  - Valentino Zucchella Paz
 date: "Grupo Warrior-of-Interruptions — 2026"
 lang: es
 ---
