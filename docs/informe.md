@@ -27,24 +27,19 @@ lang: es
 
 # 1. Introducción y objetivo
 
-El trabajo simula una granja industrial de impresión 3D. El sistema recibe órdenes
-de fabricación, les asigna una impresora, valida el modelo, ejecuta la impresión y
-controla la calidad de la pieza obtenida. Cada orden comienza en `CREATED` y
-finaliza exactamente en uno de cuatro estados terminales: `APPROVED`, `REJECTED`,
-`PRINT_FAILED` o `DEFECTIVE`.
+El trabajo simula una granja industrial de impresión 3D. El sistema recibe órdenes de fabricación, les asigna una impresora, valida el modelo, ejecuta la impresión y controla la calidad de la pieza obtenida. Cada orden comienza en `CREATED` y finaliza exactamente en uno de cuatro estados terminales: `APPROVED`, `REJECTED`, `PRINT_FAILED` o `DEFECTIVE`.
 
-Los objetivos son: (i) que las cuatro etapas funcionen **concurrentemente**,
-(ii) que compartan recursos de manera segura, (iii) que todas las órdenes se
-procesen conservando la consistencia de sus estados y (iv) que la simulación
-finalice sin dejar hilos activos ni impresoras reservadas.
+Los objetivos son: 
+  i. que las cuatro etapas funcionen **concurrentemente**
+  ii. que compartan recursos de manera segura
+  iii. que todas las órdenes se procesen conservando la consistencia de sus estados y
+  iv. que la simulación finalice sin dejar hilos activos ni impresoras reservadas.
 
 
 
 # 2. Arquitectura general
 
-La solución organiza el trabajo como un **pipeline de cuatro etapas** comunicadas
-por colas FIFO. El hilo principal (`main`) crea las órdenes y las deposita en la
-primera cola; a partir de ahí, los workers avanzan cada orden por el recorrido:
+La solución organiza el trabajo como un **pipeline de cuatro etapas** comunicadas por colas FIFO. El hilo principal (`main`) crea las órdenes y las deposita en la primera cola; a partir de ahí, los workers avanzan cada orden por el recorrido:
 
 ```text
 CREATED
@@ -64,33 +59,54 @@ PRINTED
   └── defectuosa ──────► DEFECTIVE
 ```
 
-La cantidad de workers por etapa se toma de la configuración (config oficial:
-3 asignación, 2 validación, 3 impresión, 2 calidad). **Todas las etapas se inician
-al comienzo**: cada worker se registra y espera en una compuerta común
-(`StartGate`) hasta que el principal confirma que los diez están listos y la abre.
-De este modo ninguna etapa procesa una orden antes de que todas hayan arrancado.
+La cantidad de workers por etapa se toma de la configuración (config oficial: 3 asignación, 2 validación, 3 impresión, 2 calidad). **Todas las etapas se inician al comienzo**: cada worker se registra y espera en una compuerta común (`StartGate`) hasta que el principal confirma que los diez están listos y la abre. De este modo ninguna etapa procesa una orden antes de que todas hayan arrancado.
 
 
 
 ## 2.1 Diagrama de clases
 
-![Diagrama de clases simplificado de la solución](UML/diagrama-clase-minimalista.png)
+![Diagrama de clases simplificado de la solución](/docs/DiagramasUML/DiagramasDeClases/DiagramaDeClases_Minimalista.png)
 
 `ConcurrentSimulation` es el punto de entrada: crea las órdenes y las impresoras, las cuatro `StageQueue` y los diez workers.   
 Los cuatro workers de etapa (`AssignmentWorker`, `ValidationWorker`, `PrintingWorker`, `QualityControlWorker`) heredan de `AbstractStageWorker`, que concentra el protocolo común (retirar de la cola, reconocer píldoras, reportar al `StageBarrier`), cada implementacion cambia la acción del hilo para procesar y cuando termina.   
-`WorkItem` envuelve el trabajo que circula entre colas (una orden o una píldora) y `StageQueue` es la
-frontera FIFO entre etapas.   
+`WorkItem` envuelve el trabajo que circula entre colas (una orden o una píldora) y `StageQueue` es la frontera FIFO entre etapas.   
 `PrinterPool` administra la matriz de impresoras.  
 Las clases de `runtime` (`StartGate`, `StageBarrier`, `TerminationTracker`, `WorkerGroup`) coordinan arranque, cierre y terminación.
 
 ## 2.2 Diagrama de secuencia
 
-![Diagrama de secuencia — inicio conjunto y recorrido de una orden](diagrama-secuencia.png)
+La vida del programa se separa en 4 diagramas de secuencia para mejor entendimiento de este:
+1. Arranque: inicializacion de workers e inicio coordinado
+2. Recorrido: vida y camino feliz de cada worker
+3. Salidas anticipadas: no realizan todas las etapas
+4. Cierre: estrategia para terminar workers e hilo principal (poison pills).
 
-La secuencia comienza con el **arranque conjunto**: los diez workers se registran y quedan esperando en `StartGate` hasta que `main` abre la compuerta; así ninguna etapa procesa una orden antes de que todas las etapas estén iniciadas. 
+La secuencia comienza con el **arranque conjunto**: los diez workers se registran en se da arranque (`workers.startAll()`). Quedan esperando en `StartGate` hasta que `main` abre la compuerta; así ninguna etapa procesa una orden antes de que todas las etapas estén iniciadas. Los hilos aumentan un contador, luego notifican a todos y se van a dormir, llega un momento que al levantar todos, el main chequea la condicion y allí levanta la barrera.
+
+![Diagrama de secuencia — arranque](/docs/DiagramasUML/DiagramasDeSecuencia/diagrama-secuencia-1-arranque.png)
+
 Luego se sigue el **recorrido feliz** de una orden: 
 **asignación** (reserva una impresora): de CREATED a WAITING_VALIDATION -> **validacion**: de  WAITING_VALIDATION a READY_TO_PRINT → **impresión** (libera impresora): de READY_TO_PRINT a PRINTED → **calidad**: de PRINTED a APPROVED.
-El diagrama incluye las **salidas anticipadas**: modelo inválido → `REJECTED` (libera la impresora) y fallo de impresión → `PRINT_FAILED`. En cada transición el worker registra el evento en `EventLog` —asignando el `sequence`— antes de encolar la orden en la etapa siguiente.
+Cuando terminan de procesar una orden correctamente, aumentan el contador de `TerminationTracker` y ofrecen la orden a la cola de salida (entrada de la próxima etapa).
+En cada transición el worker registra el evento en `EventLog` —asignando el `sequence`— antes de encolar la orden en la etapa siguiente.
+
+![Diagrama de secuencia — recorrido](/docs/DiagramasUML/DiagramasDeSecuencia/diagrama-secuencia-2-recorrido.png)
+
+El diagrama incluye las **salidas anticipadas** que se dan cuando OutcomeDecider devuelve false:
+- en `validation`: modelo inválido → `REJECTED` (y libera la impresora -> `AVAILABLE`)
+- en `printing`: fallo de impresión → `PRINT_FAILED` (y marca impresora como `OUT_OF_SERVICE`)
+- en `quality control`: fallo en control de calida -> `REJECTED` (y libera la impresora -> `AVAILABLE`). 
+Notar que sigue informando a `TerminationTracker` cuando una orden se completa.
+
+![Diagrama de secuencia — salidas](/docs/DiagramasUML/DiagramasDeSecuencia/diagrama-secuencia-3-salidas.png)
+
+La terminacion en cascada de los hilos se resuelve con el paradigma de pildoras venenosas.
+Las colas de entrada y salida `StageQueue` contienen `WorkItem`, que puede ser `Order` o `null` (pildora)
+Cuando un worker toma una pildora, es su señal de terminacion (`return` de bucle while, termina `run()`), si es el ultimo debe meter tantas pildoras como workers en la cola de la siguiente etapa.
+Globalmente, el programa termina cuando se llega a la cant maxima de ordenes en `TerminationTracker` (`termination.awaitAll()`) y cuando no hay mas workers vivos (`workers.joinAll()`).
+
+![Diagrama de secuencia — terminacion](/docs/DiagramasUML/DiagramasDeSecuencia/diagrama-secuencia-4-terminacion.png)
+
 
 # 3. Recursos compartidos
 
