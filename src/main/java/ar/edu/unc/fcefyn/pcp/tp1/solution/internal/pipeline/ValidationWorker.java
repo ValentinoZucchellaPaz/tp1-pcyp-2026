@@ -55,6 +55,7 @@ public final class ValidationWorker extends AbstractStageWorker {
 
     @Override
     protected void onLastWorkerFinished() {
+        //nextWorkerCount -> cuantos workers tiene la etapa siguiente (1 pildora x worker)
         output.offerPoison(nextWorkerCount);
     }
 }

@@ -8,6 +8,11 @@
   `durationMillis` y la distribución de estados finales, y finalmente restaura
   la configuración original y regenera la corrida oficial en `resultados/`.
 
+  Detecta Java solo (JAVA_HOME, PATH o ~/.jdks). Maven se busca en PATH, en el
+  wrapper del repo (./mvnw) o en el Maven embebido de IntelliJ; solo hace falta
+  para (re)compilar. Si no hay Maven pero ya existe `target/tp1.jar`, corre
+  igual con ese jar.
+
   Salidas:
     tools/analisis/configs/<variante>.properties  (config de cada variante)
     tools/analisis/salidas/resultados.csv         (una fila por corrida)
@@ -24,18 +29,26 @@
   Override de la cantidad de órdenes para acortar los barridos (por defecto 500).
 
 .PARAMETER SkipBuild
-  No compila; usa el `target/tp1.jar` existente.
+  No compila; usa el `target/tp1.jar` existente. Si no hay Maven pero el jar ya
+  está, el script lo usa automáticamente aunque no pases este switch.
 
 .EXAMPLE
+  # Solo requiere un JDK: detecta Java y compila si hay Maven.
   powershell -ExecutionPolicy Bypass -File tools\analisis\run-experiments.ps1
+
+.EXAMPLE
+  # Fuerza el uso del jar existente (sin Maven).
+  powershell -ExecutionPolicy Bypass -File tools\analisis\run-experiments.ps1 -SkipBuild
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File tools\analisis\run-experiments.ps1 -Scenario All -Runs 5
 #>
+
+############ CAMBIO DE ESCENARIO DE EJECUCION ############
 [CmdletBinding()]
 param(
     [ValidateSet('Official', 'Threads', 'Delays', 'All')]
-    [string]$Scenario = 'Official',
+    [string]$Scenario = 'Delays',
 
     [int]$Runs = 5,
 
@@ -56,7 +69,43 @@ $MdPath     = Join-Path $OutDir 'resumen.md'
 
 New-Item -ItemType Directory -Force -Path $OutDir, $CfgDir | Out-Null
 
+function Resolve-Java {
+    if ($env:JAVA_HOME) {
+        $candidate = Join-Path $env:JAVA_HOME 'bin\java.exe'
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+
+    $fromPath = Get-Command java -ErrorAction SilentlyContinue
+    if ($fromPath) { return $fromPath.Source }
+
+    $jdkRoot = Join-Path $env:USERPROFILE '.jdks'
+    if (Test-Path -LiteralPath $jdkRoot) {
+        $hit = Get-ChildItem $jdkRoot -Filter 'java.exe' -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\bin\\java\.exe$' } |
+            Sort-Object FullName -Descending | Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
+
+    $globs = @(
+        "$env:ProgramFiles\Java\*\bin\java.exe",
+        "$env:ProgramFiles\Eclipse Adoptium\*\bin\java.exe",
+        "$env:LOCALAPPDATA\Programs\*\bin\java.exe"
+    )
+    foreach ($glob in $globs) {
+        $found = Get-Item $glob -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { return $found.FullName }
+    }
+
+    throw "No se encontró Java. Instalá un JDK 21+ o definí JAVA_HOME."
+}
+
 function Resolve-Maven {
+    # Wrapper del propio repositorio (./mvnw), si existe.
+    foreach ($wrapper in @('mvnw.cmd', 'mvnw')) {
+        $candidate = Join-Path $RepoRoot $wrapper
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+
     $cmd = Get-Command mvn.cmd -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
     $cmd = Get-Command mvn -ErrorAction SilentlyContinue
@@ -65,17 +114,19 @@ function Resolve-Maven {
     $globs = @(
         "$env:ProgramFiles\JetBrains\*\plugins\maven-plugin\lib\maven3\bin\mvn.cmd",
         "$env:LOCALAPPDATA\Programs\*\plugins\maven-plugin\lib\maven3\bin\mvn.cmd",
-        "D:\IntelliJ IDEA*\plugins\maven-plugin\lib\maven3\bin\mvn.cmd",
+        "$env:LOCALAPPDATA\JetBrains\*\plugins\maven-plugin\lib\maven3\bin\mvn.cmd",
         "C:\IntelliJ IDEA*\plugins\maven-plugin\lib\maven3\bin\mvn.cmd",
-        "D:\*\plugins\maven-plugin\lib\maven3\bin\mvn.cmd"
+        "D:\IntelliJ IDEA*\plugins\maven-plugin\lib\maven3\bin\mvn.cmd"
     )
     foreach ($glob in $globs) {
         $hit = Get-Item $glob -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($hit) { return $hit.FullName }
     }
-    throw "No se encontró Maven. Compilá con 'mvn clean package' o pasá -SkipBuild con target\tp1.jar ya generado."
+
+    return $null
 }
 
+############ CAMBIO DE DELAYS ############
 $Base = [ordered]@{
     Orders = $Orders; Seed = 20261001; Rows = 10; Cols = 20
     Assign = 3; Valid = 2; Print = 3; Quality = 2
@@ -136,6 +187,7 @@ function Get-Stats($values) {
     [pscustomobject]@{ Min = [int]$sorted[0]; Median = $median; Max = [int]$sorted[-1] }
 }
 
+############ CAMBIO COMBINACION DE HILOS ############
 $variants = @()
 if ($Scenario -in @('Official', 'All')) {
     $variants += New-Variant 'official' 'official' @{}
@@ -148,6 +200,8 @@ if ($Scenario -in @('Threads', 'All')) {
     $variants += New-Variant 'threads-3-4-3-2' 'threads' @{ Assign = 3; Valid = 4; Print = 3; Quality = 2 }
     $variants += New-Variant 'threads-3-2-4-2' 'threads' @{ Assign = 3; Valid = 2; Print = 4; Quality = 2 }
     $variants += New-Variant 'threads-3-4-4-2' 'threads' @{ Assign = 3; Valid = 4; Print = 4; Quality = 2 }
+    #Acá dejo comentado una nueva variante para hacerlo a gusto
+    #$variants += New-Variant 'threads-3-4-4-2' 'threads' @{ Assign = 3; Valid = 4; Print = 4; Quality = 2 }
 }
 if ($Scenario -in @('Delays', 'All')) {
     $variants += New-Variant 'delays-0' 'delays' @{ DelayAssign = 0; DelayValid = 0; DelayPrint = 0; DelayQuality = 0 }
@@ -161,16 +215,39 @@ if ($Scenario -in @('Delays', 'All')) {
 $originalConfig = Get-Content -LiteralPath $ConfigPath -Raw
 Push-Location $RepoRoot
 
+$java = Resolve-Java
+
 try {
-    if (-not $SkipBuild) {
+    if ($SkipBuild) {
+        if (-not (Test-Path -LiteralPath $JarPath)) {
+            throw "Pediste -SkipBuild pero no existe $JarPath. Compilá primero con Maven."
+        }
+        Write-Host "Usando el jar existente: $JarPath"
+    }
+    else {
         $mvn = Resolve-Maven
-        Write-Host "Compilando con: $mvn"
-        & $mvn -q -DskipTests clean package
-        if ($LASTEXITCODE -ne 0) { throw "La compilación falló (exit $LASTEXITCODE)." }
+        if ($mvn) {
+            $javaHome = Split-Path -Parent (Split-Path -Parent $java)
+            if (Test-Path -LiteralPath (Join-Path $javaHome 'bin\javac.exe')) {
+                $env:JAVA_HOME = $javaHome
+            }
+            Write-Host "Compilando con: $mvn"
+            Write-Host "  (JAVA_HOME=$env:JAVA_HOME)"
+            & $mvn -q -DskipTests clean package
+            if ($LASTEXITCODE -ne 0) { throw "La compilación falló (exit $LASTEXITCODE)." }
+        }
+        elseif (Test-Path -LiteralPath $JarPath) {
+            Write-Host "No se encontró Maven; se usa el jar existente: $JarPath"
+            Write-Host "  (Para recompilar, instalá Maven 3.9+ o corré 'mvn clean package'.)"
+        }
+        else {
+            throw "No se encontró Maven y no existe $JarPath. Instalá Maven 3.9+ (requisito del proyecto) o compilá el jar y volvé a correr con -SkipBuild."
+        }
     }
     if (-not (Test-Path -LiteralPath $JarPath)) {
-        throw "No existe $JarPath. Compilá primero o quitá -SkipBuild."
+        throw "No existe $JarPath."
     }
+    Write-Host "Java: $java"
 
     $records = New-Object System.Collections.Generic.List[object]
     $summaryRows = New-Object System.Collections.Generic.List[object]
@@ -184,7 +261,7 @@ try {
         $durations = @()
         $lastSummary = $null
         for ($run = 1; $run -le $Runs; $run++) {
-            & java -jar $JarPath | Out-Null
+            & $java -jar $JarPath | Out-Null
             $summary = Read-Summary (Join-Path $RepoRoot 'resultados\resumen.properties')
             $duration = [int]$summary['durationMillis']
             $durations += $duration
@@ -240,7 +317,10 @@ try {
     $summaryRows | Format-Table -AutoSize
 
     Write-Host "Regenerando corrida oficial en resultados/ ..."
-    & java -jar $JarPath | Out-Null
+    $officialCfg = Join-Path $CfgDir 'official.properties'
+    Write-ConfigFile $officialCfg $Base
+    Copy-Item -LiteralPath $officialCfg -Destination $ConfigPath -Force
+    & $java -jar $JarPath | Out-Null
 
     Write-Host ""
     Write-Host "Listo."
