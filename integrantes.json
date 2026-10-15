@@ -4,29 +4,28 @@
   "integrantes": [
     {
       "nombre": "Rafael Barrio",
-      "documento": "46.472.542",
+      "documento": "46472542",
       "usuarioGit": "Rafa-Barrio"
     },
     {
       "nombre": "Alexis Tomás Garay",
-      "documento": "46.032.555",
+      "documento": "46032555",
       "usuarioGit": "Garay1913"
     },
     {
       "nombre": "Pedro Guzmán Gonzalez",
-      "documento": "46.068.277",
+      "documento": "46068277",
       "usuarioGit": "PedroGuzmanGonzalez"
     },
     {
       "nombre": "Santino Chesta",
-      "documento": "45.711.131",
+      "documento": "45711131",
       "usuarioGit": "SantinoChesta"
     },
     {
       "nombre": "Valentino Zucchella Paz",
-      "documento": "44.578.880",
+      "documento": "44578880",
       "usuarioGit": "ValentinoZucchellaPaz"
     }
   ]
 }
-

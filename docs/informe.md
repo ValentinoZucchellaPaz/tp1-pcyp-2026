@@ -242,8 +242,13 @@ makespan ≈ 430 + 499 · 60 = 30 370 ms ≈ 30.4 s
 
 - Configuración oficial salvo la variable que se modifique en cada barrido.
 - Semilla fija, de modo que los estados finales son idénticos entre corridas y solo varía el tiempo.
-- Cinco corridas por variante; se reporta mediana (mín.–máx.) de `durationMillis`.
-- Entorno de medición: AMD Ryzen 5 2600 (6 núcleos / 12 hilos lógicos), 16 GB de RAM, Windows 11 Pro, OpenJDK 25 (JetBrains Runtime).
+- Cinco corridas por variante. Usamos la **mediana** como tiempo representativo:
+  una corrida aislada puede tardar más por tareas del sistema operativo, pero la
+  mediana no se altera tanto como el promedio. También mostramos el mínimo y el
+  máximo para ver cuánto variaron las corridas.
+
+El procedimiento reproducible, los datos crudos y el análisis ampliado se
+encuentran en [la documentación de experimentos](../tools/analisis/README.md).
 
 ## 10.2 Corrida oficial
 
@@ -266,7 +271,10 @@ La mediana observada (30 896 ms) coincide con la predicción teórica (30 370 ms
 
 ## 10.4 Efecto de cambiar la cantidad de hilos
 
-Con las demoras oficiales fijas, el ciclo de la etapa `i` es `demoraᵢ / hilosᵢ` y el makespan predicho es `Σdemoras + (N−1)·max(cicloᵢ)` (sección 9). El runner `tools/analisis/run-experiments.ps1 -Scenario Threads` genera las siguientes variantes:
+En este experimento se mantienen las demoras oficiales y solo se cambia la
+cantidad de hilos. El tiempo teórico se calcula con el modelo de la sección 9.
+El runner `tools/analisis/run-experiments.ps1 -Scenario Threads` genera estas
+variantes:
 
 | asig/val/imp/cal | cuello de botella | ciclo (ms) | makespan teórico (ms) |
 | --- | --- | ---: | ---: |
@@ -278,11 +286,39 @@ Con las demoras oficiales fijas, el ciclo de la etapa `i` es `demoraᵢ / hilos�
 | 3/4/4/2 | impresión | 45 | ~22 885 |
 | 4/4/4/4 | impresión | 45 | ~22 885 |
 
-La hipótesis central es que **aumentar un solo cuello de botella no reduce el makespan** (3/4/3/2 y 3/2/4/2 quedan en ~30 s) y que **aumentar ambos sí lo reduce** (3/4/4/2 cae a ~22.9 s). La ejecución de este barrido quedó como trabajo futuro (sección 12); el runner ya está listo para reproducirla con la corrida oficial.
+Los resultados medidos fueron:
+
+| asig/val/imp/cal | mediana (ms) | teórico (ms) | mín.–máx. (ms) |
+| --- | ---: | ---: | ---: |
+| 1/1/1/1 | 77 808 | ~90 250 | 77 798–77 810 |
+| 2/2/2/2 | 39 145 | ~45 340 | 39 131–39 154 |
+| 3/2/3/2 (oficial) | 30 561 | ~30 370 | 30 557–30 566 |
+| 3/4/3/2 | 26 214 | ~30 370 | 26 201–26 219 |
+| 3/2/4/2 | 30 507 | ~30 370 | 30 501–30 516 |
+| 3/4/4/2 | 19 800 | ~22 885 | 19 798–19 812 |
+| 4/4/4/4 | 19 808 | ~22 885 | 19 801–19 810 |
+
+Al pasar de 1 a 2 hilos por etapa, el tiempo casi se reduce a la mitad. La
+configuración oficial tarda cerca de 30,5 s. Agregar un hilo solo a impresión
+(3/2/4/2) prácticamente no cambia nada: validación sigue marcando el ritmo.
+
+En cambio, subir solo validación (3/4/3/2) baja el tiempo a 26,2 s. Esto parece
+contradecir la predicción simple, pero tiene una explicación: impresión recibe
+429 órdenes, no las 500 iniciales, porque 71 se rechazan en validación. Por eso
+el valor teórico sirve como referencia, aunque no describe por completo los
+casos donde impresión es la etapa más lenta. Con 3/4/4/2 el tiempo baja a
+19,8 s; llevar también asignación y calidad a cuatro hilos no da una mejora
+visible (19,808 s).
+
+Todas las variantes conservaron la misma distribución final de estados
+(359 aprobadas, 71 rechazadas, 45 fallidas y 25 defectuosas), por lo que los
+cambios de concurrencia afectaron el tiempo, no el resultado de negocio.
 
 ## 10.5 Efecto de cambiar las demoras
 
-Escalando todas las demoras por un factor `k` con los hilos oficiales (3/2/3/2), el makespan predicho es `k·430 + (N−1)·max(cicloᵢ(k))`, con `cicloᵢ = k·demoraᵢ/hilosᵢ`. Variantes del runner (`-Scenario Delays`):
+En este caso se usan los hilos oficiales (3/2/3/2) y se multiplican todas las
+demoras por el mismo factor `k`. Así se ve directamente qué pasa cuando cada
+etapa tarda más o menos. Variantes del runner (`-Scenario Delays`):
 
 | factor | demoras (ms) | cuello | ciclo (ms) | makespan teórico (ms) |
 | --- | --- | --- | ---: | ---: |
@@ -291,7 +327,24 @@ Escalando todas las demoras por un factor `k` con los hilos oficiales (3/2/3/2),
 | ×1 (oficial) | 50/120/180/80 | validación = impresión | 60 | ~30 370 |
 | ×2 | 100/240/360/160 | validación = impresión | 120 | ~60 740 |
 
-Para `k > 0` el tiempo crece de forma aproximadamente lineal con el factor y validación e impresión vuelven a empatar como cuello de botella. La ejecución quedó pendiente (sección 12).
+Los resultados medidos fueron:
+
+| factor | demoras (ms) | mediana (ms) | teórico (ms) | mín.–máx. (ms) |
+| --- | --- | ---: | ---: | ---: |
+| ×0 | 0/0/0/0 | 61 | ~0 (solo overhead) | 59–67 |
+| ×0.5 | 25/60/90/40 | 15 398 | ~15 185 | 15 376–15 484 |
+| ×1 (oficial) | 50/120/180/80 | 30 564 | ~30 370 | 30 557–30 576 |
+| ×2 | 100/240/360/160 | 60 931 | ~60 740 | 60 919–60 962 |
+
+Los números siguen una relación casi lineal: con la mitad de demora se tarda
+aproximadamente la mitad (15,398 s), y al duplicarla se tarda casi el doble
+(60,931 s). La pequeña diferencia con el valor teórico, de unos 200 ms, es el
+costo fijo de iniciar la simulación, coordinar hilos y escribir los archivos.
+
+Con demoras nulas, todo el pipeline tarda solo 61 ms. Esto muestra que, en la
+configuración oficial, casi todo el tiempo corresponde al trabajo simulado y
+no a la infraestructura concurrente. En todas las variantes se mantuvieron los
+mismos estados finales: 359/71/45/25.
 
 # 11. Justificación de las decisiones de diseño
 
@@ -307,7 +360,7 @@ El ADR-01 documenta la decisión central: una **cola por transición** de etapa 
 # 12. Conclusiones
 
 - **Correctitud:** las cuatro etapas se ejecutan concurrentemente y cada orden alcanza exactamente un estado terminal, sin estados intermedios residuales ni impresoras `RESERVED` al finalizar. Las cinco corridas oficiales produjeron la misma distribución de estados (359/71/45/25), confirmando el determinismo del `OutcomeDecider`. La suite de pruebas (pública + del grupo) verifica los invariantes de estados, recursos y terminación.
-- **Desempeño:** la mediana observada (30 896 ms) coincide con la predicción teórica (30 370 ms) dentro de ~1.7 %, validando el modelo de cuello de botella con validación e impresión empatadas en un ciclo de 60 ms por orden.
+- **Desempeño:** la corrida oficial y los dos barridos confirman el modelo de pipeline. Al variar hilos, el análisis se refinó para considerar cuántas órdenes llega a procesar cada etapa: validación gobierna la configuración oficial, mientras que impresión procesa menos órdenes por los rechazos previos. Al escalar las demoras, el tiempo resultó lineal y el overhead fijo fue cercano a 200 ms.
 - **Aprendizajes:** la combinación de colas FIFO con semáforos, píldoras de cierre y una barrera por etapa resulta en un pipeline simple de razonar, sin espera activa y con cierre seguro en cascada; el determinismo se apoya en usar `OutcomeDecider` como única fuente de decisión de negocio.
 
 
